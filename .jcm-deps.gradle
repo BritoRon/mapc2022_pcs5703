@@ -1,0 +1,9 @@
+// Arquivo regenerado pelo JaCaMo (task buildJCMDeps). Contem dependencias
+// extras declaradas no .jcm. Por enquanto vazio - sera preenchido se voce
+// usar diretivas como "import" no .jcm pedindo pacotes externos.
+
+apply plugin: 'java'
+
+dependencies {
+
+}

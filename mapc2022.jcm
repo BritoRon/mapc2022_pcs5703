@@ -1,0 +1,85 @@
+/*
+ * Projeto JaCaMo: mapc2022_pcs5703
+ *
+ * Disciplina: PCS 5703 - Sistemas Multi-Agentes (1Q/2026)
+ * Exercicio:  2o Exercicio Pratico - Agents Assemble II / MAPC 2022
+ *
+ * Este arquivo .jcm e o "ponto de entrada" do JaCaMo. Declara as 3 dimensoes
+ * do MAS:
+ *   1. AGENTES (Jason)        -> blocos "agent ..."
+ *   2. AMBIENTE (CArtAgO)     -> bloco "workspace ..."
+ *   3. ORGANIZACAO (MOISE+)   -> bloco "organisation ..."
+ *
+ * IMPORTANTE: a ORDEM dos blocos no .jcm IMPORTA. O parser do JaCaMo 1.3
+ * exige: primeiro AGENTES, depois WORKSPACE, depois ORGANISATION.
+ *
+ * Como conectar com o servidor MASSim 2022?
+ *
+ *   Como o JaCaMo 1.3 espera CArtAgO como AMBIENTE UNICO (nao suporta
+ *   declarar um jason.environment.Environment customizado direto no .jcm),
+ *   nos envolvemos a biblioteca EISMASSim num artefato CArtAgO chamado
+ *   `mapc.EISArtifact`. Ver src/env/mapc/EISArtifact.java para detalhes.
+ *
+ *   Cada agente Jason tem seu PROPRIO artefato EIS, focado por ele aqui no
+ *   .jcm. O artefato em runtime:
+ *     - abre conexao TCP com o MASSim via conf/eismassimconfig.json,
+ *     - traduz percepcoes IILang -> observable properties (que viram crencas),
+ *     - expoe operacoes OPERATION para cada acao do MAPC (move, attach, etc).
+ */
+mas mapc2022 {
+
+    /*
+     * AGENTES JASON (devem vir antes de workspace/organisation no .jcm)
+     *
+     * Para cada agente:
+     *   - <nome_arquivo>.asl tem a logica BDI
+     *   - focus em DOIS artefatos: o blackboard e o EIS proprio
+     *   - joins time_a + roles <papel social MOISE+>
+     *
+     * O nome do agente Jason DEVE ser igual ao:
+     *   (a) parametro do EISArtifact correspondente (workspace abaixo),
+     *   (b) campo "name" da entidade em conf/eismassimconfig.json.
+     */
+
+    agent coordenador1 : coordenador.asl {
+        focus: equipe.quadro, equipe.eis_coordenador1
+        roles: coordinator in time_a
+    }
+
+    agent explorador1 : explorador.asl {
+        focus: equipe.quadro, equipe.eis_explorador1
+        roles: explorer in time_a
+    }
+
+    agent explorador2 : explorador.asl {
+        focus: equipe.quadro, equipe.eis_explorador2
+        roles: explorer in time_a
+    }
+
+    /*
+     * AMBIENTE COMPARTILHADO (workspace CArtAgO)
+     *
+     * - quadro: blackboard do time, ver QuadroEquipe.java
+     *
+     * - eis_<nome_agente>: um artefato EISArtifact por agente. O parametro
+     *   string entre parenteses DEVE BATER com o nome do agente Jason e com
+     *   o nome da entidade declarada em conf/eismassimconfig.json - essa
+     *   tripla coincidencia e o que permite ao EISMASSim associar tudo.
+     */
+    workspace equipe {
+        artifact quadro            : mapc.QuadroEquipe()
+        artifact eis_coordenador1  : mapc.EISArtifact("coordenador1")
+        artifact eis_explorador1   : mapc.EISArtifact("explorador1")
+        artifact eis_explorador2   : mapc.EISArtifact("explorador2")
+    }
+
+    /*
+     * ORGANIZACAO MOISE+
+     *
+     * Le src/org/org.xml e instancia o grupo "time_a" (template "grupo_time")
+     * com seus papeis e esquema social.
+     */
+    organisation o : org.xml {
+        group time_a: grupo_time
+    }
+}

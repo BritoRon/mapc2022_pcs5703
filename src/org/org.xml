@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="https://moise-lang.github.io/xml/os.xsl" type="text/xsl" ?>
+
+<!--
+    Especificacao Organizacional MOISE+ para o time MAPC 2022.
+
+    O modelo MOISE+ separa a organizacao em tres dimensoes:
+
+      1. ESTRUTURAL  (structural-specification)
+         - Define os PAPEIS (roles) e a forma de agrupa-los (groups).
+         - Aqui temos 3 papeis: coordinator, explorer, worker.
+           * coordinator: decide quais tarefas o time vai aceitar.
+           * explorer:    descobre o mapa, dispensers, goal zones, taskboards.
+           * worker:      busca blocos e monta as estruturas pedidas pela tarefa.
+
+      2. FUNCIONAL   (functional-specification)
+         - Define o ESQUEMA SOCIAL: meta global do time decomposta em sub-metas
+           e organizada em MISSOES que serao adotadas pelos agentes.
+         - Aqui temos 1 esquema: completar_tarefa, com 3 missoes.
+
+      3. DEONTICA    (normative-specification)
+         - Define quais papeis sao OBRIGADOS / PERMITIDOS / PROIBIDOS
+           a se comprometer com quais missoes.
+         - As normas aqui sao obrigacoes: papel X tem dever de assumir missao Y.
+
+    OBSERVACAO IMPORTANTE: estes "papeis sociais" (coordinator/explorer/worker)
+    NAO se confundem com os "roles do cenario" do MASSim 2022 (default, worker,
+    digger, explorer, constructor). Os roles do cenario governam o que o agente
+    pode FISICAMENTE fazer no jogo (acoes disponiveis, alcance de visao, etc) e
+    sao adotados via a acao adopt(<nome_do_role_massim>) durante a partida.
+    Os papeis MOISE+ governam o que o agente DEVE FAZER do ponto de vista
+    organizacional. Um agente coordinator MOISE+ pode adotar o role MASSim
+    "default", por exemplo. Um worker MOISE+ tipicamente adotara o role MASSim
+    "worker" ou "constructor".
+-->
+
+<organisational-specification
+    id="mapc2022_org"
+    os-version="1.1"
+
+    xmlns='http://moise.sourceforge.net/os'
+    xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'
+    xsi:schemaLocation='http://moise.sourceforge.net/os
+                        https://moise-lang.github.io/xml/os.xsd' >
+
+    <!-- =================================================================== -->
+    <!-- DIMENSAO ESTRUTURAL                                                  -->
+    <!-- =================================================================== -->
+    <structural-specification>
+
+        <role-definitions>
+            <!--
+                Os papeis aqui sao planos. A heranca (extends) ainda nao e
+                usada neste esqueleto, mas pode ser util para definir um
+                "membro_do_time" abstrato que todo papel herda.
+            -->
+            <role id="coordinator" />
+            <role id="explorer"    />
+            <role id="worker"      />
+        </role-definitions>
+
+        <!--
+            Template do grupo do time. O .jcm instancia este template como
+            "time_a" (ver mapc2022.jcm).
+
+            Cardinalidades min/max definem quantos agentes podem/devem
+            assumir cada papel:
+              - coordinator: exatamente 1 (lider unico)
+              - explorer:    1 a 50 (escala com o tamanho da equipe)
+              - worker:      0 a 50 (sera usado quando os exploradores
+                                     "se promoverem" a worker apos achar blocos)
+        -->
+        <group-specification id="grupo_time">
+            <roles>
+                <role id="coordinator" min="1" max="1"/>
+                <role id="explorer"    min="1" max="50"/>
+                <role id="worker"      min="0" max="50"/>
+            </roles>
+
+            <!--
+                Links definem CANAIS DE INTERACAO permitidos entre papeis.
+                  authority:     coordinator pode dar ordens a explorer/worker
+                  communication: explorer e worker podem reportar ao coordinator
+            -->
+            <links>
+                <link from="coordinator" to="explorer" type="authority"
+                      scope="intra-group" bi-dir="false"/>
+                <link from="coordinator" to="worker"   type="authority"
+                      scope="intra-group" bi-dir="false"/>
+                <link from="explorer"    to="coordinator" type="communication"
+                      scope="intra-group" bi-dir="false"/>
+                <link from="worker"      to="coordinator" type="communication"
+                      scope="intra-group" bi-dir="false"/>
+                <link from="worker"      to="worker"   type="communication"
+                      scope="intra-group" bi-dir="true"/>
+            </links>
+
+            <!--
+                Compatibilidades: um mesmo agente pode acumular esses papeis.
+                Util quando um explorer "vira" worker dinamicamente apos
+                encontrar blocos suficientes.
+            -->
+            <formation-constraints>
+                <compatibility from="explorer" to="worker" />
+            </formation-constraints>
+        </group-specification>
+    </structural-specification>
+
+    <!-- =================================================================== -->
+    <!-- DIMENSAO FUNCIONAL                                                   -->
+    <!-- =================================================================== -->
+    <functional-specification>
+
+        <!--
+            ESQUEMA SOCIAL "completar_tarefa".
+
+            Decomposicao da meta global em sub-metas (em arvore). Cada
+            sub-meta sera atacada por agentes que se comprometeram com a
+            missao apropriada.
+
+            Plano operator="sequence": as sub-metas sao satisfeitas em
+            ordem; "parallel" permitiria paralelo.
+
+            Os atributos:
+              ttf = "time to fail" (timeout para o objetivo)
+              ds  = "description"  (descricao livre)
+        -->
+        <scheme id="completar_tarefa">
+
+            <goal id="time_funcionando">
+                <plan operator="sequence">
+                    <goal id="mapear_ambiente"
+                          ds="explorar grid e descobrir dispensers, goal zones e taskboards"/>
+                    <goal id="aceitar_tarefa"
+                          ds="coordinator escolhe e aceita uma task num taskboard"/>
+                    <goal id="montar_estrutura"
+                          ds="workers buscam blocos e os conectam segundo o pattern"/>
+                    <goal id="submeter_tarefa"
+                          ds="agente em goal zone executa submit(task)"/>
+                </plan>
+            </goal>
+
+            <!--
+                MISSOES: agrupam metas que serao executadas pelo MESMO agente.
+                Cada missao tera uma cardinalidade min/max (quantos agentes
+                podem/devem se comprometer com ela).
+            -->
+            <mission id="m_explorar"  min="1" max="50">
+                <goal id="mapear_ambiente"/>
+            </mission>
+
+            <mission id="m_coordenar" min="1" max="1">
+                <goal id="aceitar_tarefa"/>
+            </mission>
+
+            <mission id="m_construir" min="1" max="50">
+                <goal id="montar_estrutura"/>
+                <goal id="submeter_tarefa"/>
+            </mission>
+        </scheme>
+    </functional-specification>
+
+    <!-- =================================================================== -->
+    <!-- DIMENSAO NORMATIVA                                                   -->
+    <!-- =================================================================== -->
+    <normative-specification>
+
+        <!--
+            As propriedades sao mecanismos pelos quais a runtime do MOISE+
+            (sistema ora4mas) checa violacoes. Comentadas aqui para mantermos
+            o esqueleto simples; descomente quando quiser que o sistema impeca
+            (regimente) ou produza violacoes ao quebrar a especificacao.
+
+            Valores possiveis: "fail" (regimentado), "prohibition" (gera
+            violacao), "ignore" (nao checa).
+        -->
+        <!-- properties>
+            <property id="role_compatibility"  value="prohibition" />
+            <property id="mission_cardinality" value="prohibition" />
+        </properties -->
+
+        <!--
+            NORMAS / OBRIGACOES.
+
+            "Quem tem o papel X e OBRIGADO a se comprometer com a missao Y".
+            E aqui que o time se "amarra" via deontica em vez de via
+            mensagens hard-coded - este e justamente o ponto que os papers
+            LTI-USP e JaCaMo Builders nao implementaram.
+        -->
+        <norm id="n_coord" type="obligation" role="coordinator" mission="m_coordenar"/>
+        <norm id="n_expl"  type="obligation" role="explorer"    mission="m_explorar"/>
+        <norm id="n_work"  type="obligation" role="worker"      mission="m_construir"/>
+    </normative-specification>
+
+</organisational-specification>

@@ -1,0 +1,43 @@
+{
+    "_comentario_geral": "Configuracao do EISMASSim. Lida pelo EISAdapter (src/java/jason/eis/EISAdapter.java). Define a quem se conectar e quais entidades autenticar.",
+
+    "scenario":      "assemble2022",
+    "host":          "localhost",
+    "port":          12300,
+
+    "_comentario_scheduling": "scheduling=true faz getPercepts BLOQUEAR ate ter percepts novos, garantindo sincronia step-a-step entre Jason e MASSim. NAO MUDE para false sem entender as implicacoes.",
+    "scheduling":    true,
+    "timeout":       4000,
+    "notifications": false,
+    "exceptions":    false,
+
+    "_comentario_entities": "Cada entrada aqui declara uma entidade EIS que sera autenticada no servidor MASSim. O 'name' precisa BATER com o nome do agente Jason no .jcm porque o EISAdapter faz ei.associateEntity(e, e). 'username' e a credencial para o servidor (configurada em server/conf/SampleConfig.json: 'agent' + team + indice).",
+
+    "entities": [
+        {
+            "name":         "coordenador1",
+            "username":     "agentA1",
+            "password":     "1",
+            "print-iilang": false,
+            "print-json":   false
+        },
+        {
+            "name":         "explorador1",
+            "username":     "agentA2",
+            "password":     "1",
+            "print-iilang": false,
+            "print-json":   false
+        },
+        {
+            "name":         "explorador2",
+            "username":     "agentA3",
+            "password":     "1",
+            "print-iilang": false,
+            "print-json":   false
+        }
+    ],
+
+    "_comentario_escala": "Quando quiser adicionar mais agentes (ate 50 por time no MAPC 2022), pode usar 'multi-entities' como o BasicAgents faz. Exemplo comentado abaixo - ele cria N entidades connectionA1..connectionAN automaticamente. Para isso o servidor precisa estar declarando N agentes na simulacao corrente. Use 'count': -1 para descobrir N em runtime.",
+
+    "multi-entities": []
+}

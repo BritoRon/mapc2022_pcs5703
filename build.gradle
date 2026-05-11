@@ -1,0 +1,88 @@
+/*
+ * Build do projeto JaCaMo mapc2022_pcs5703.
+ *
+ * Baseado no template gerado pelo create.sh do JaCaMo (np1.3),
+ * mesmo padrao usado pelo my1st-app irmao deste diretorio.
+ *
+ * Adicoes em relacao ao template:
+ *   1. flatDir 'lib' para puxar o eismassim.jar local.
+ *   2. dependencia explicita ao eismassim e ao eis (via flatDir).
+ *
+ * Para rodar: ./gradlew run
+ *   Pre-condicao: o servidor MASSim 2022 deve estar escutando em :12300.
+ */
+
+plugins {
+    id 'com.gradleup.shadow' version '8.3.3'
+    id 'java'
+    id 'maven-publish'
+}
+
+defaultTasks 'run'
+
+apply from: '.jcm-deps.gradle' // gerado automaticamente por buildJCMDeps
+
+version '1.0'
+group   'br.usp.poli.pcs5703'
+
+repositories {
+    maven { url "https://raw.githubusercontent.com/jacamo-lang/mvn-repo/master" }
+    maven { url "https://repo.gradle.org/gradle/libs-releases" }
+
+    flatDir { dirs 'lib' }   // <-- pega lib/eismassim.jar
+
+    mavenCentral()
+    maven { url "https://jitpack.io" }
+}
+
+dependencies {
+    implementation('org.jacamo:jacamo:1.3.0')
+
+    // EISMASSim: ponte EIS <-> servidor MASSim 2022.
+    // O nome 'eismassim' aqui resolve para lib/eismassim.jar pelo flatDir.
+    implementation name: 'eismassim'
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir 'src/env'
+            srcDir 'src/agt'
+            srcDir 'src/org'
+            srcDir 'src/int'
+            srcDir 'src/java'
+        }
+        resources {
+            srcDir 'src/resources'
+        }
+    }
+}
+
+task run (type: JavaExec, dependsOn: 'classes') {
+    group       'JaCaMo'
+    description 'Roda o MAS - antes confirme que o servidor MASSim 2022 esta rodando em :12300'
+    doFirst {
+        mkdir 'log'
+    }
+    mainClass = 'jacamo.infra.JaCaMoLauncher'
+    args 'mapc2022.jcm'
+    classpath sourceSets.main.runtimeClasspath
+    // Forca o stdout/stderr do processo JaCaMoLauncher a passar pelo
+    // console do Gradle. Sem isso, em algumas versoes do Gradle 8 a saida
+    // do MAS fica buffer-ed e o usuario nao consegue ver os prints dos agentes.
+    standardOutput = System.out
+    errorOutput    = System.err
+}
+
+task buildJCMDeps (type: JavaExec, dependsOn: 'classes') {
+    description 'Resolve dependencias declaradas no .jcm e gera .jcm-deps.gradle'
+    mainClass = 'jacamo.infra.RunJaCaMoProject'
+    args = ['mapc2022.jcm', '--deps']
+    classpath sourceSets.main.runtimeClasspath
+}
+
+clean {
+    delete 'bin'
+    delete 'build'
+    delete 'log'
+}
