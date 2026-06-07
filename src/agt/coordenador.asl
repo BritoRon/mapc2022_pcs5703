@@ -110,8 +110,11 @@
  * Criterio: maior reward (.max ordena cand(R,...) pelo 1o arg).
  */
 +!selecionar_tarefa : flag_selecionar_tarefa & precisa_selecionar <-
+    // So tasks de 1 bloco, com requisito cardinal adjacente, E cujo tipo de
+    // bloco JA tem dispenser descoberto (senao a task e incompletavel agora).
     .findall(cand(R, N, QX, QY, T),
-             ( task(N, _, R, [req(QX, QY, T)]) & (math.abs(QX) + math.abs(QY)) == 1 ),
+             ( task(N, _, R, [req(QX, QY, T)]) & (math.abs(QX) + math.abs(QY)) == 1
+               & dispenser_descoberto(_, _, T) ),
              L);
     if (L \== []) {
         .max(L, cand(_, NB, QXB, QYB, TB));
