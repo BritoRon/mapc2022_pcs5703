@@ -275,6 +275,53 @@ delta(w, -1, 0).
 
 
 /* ===================================================================== */
+/* PASSO 2 (cont.): FRAME DE REFERENCIA E PROPAGACAO DE offset_ref        */
+/* ===================================================================== */
+
+/*
+ * Frame de referencia do time (configuravel). Todas as descobertas sao
+ * publicadas no QuadroEquipe NESTE frame, para que os mapas dos varios
+ * exploradores se fundam (mesmo ponto fisico -> mesma coordenada).
+ *
+ * offset_ref(DX,DY) = transforma o frame PROPRIO no frame de referencia:
+ *   ponto_no_frame_ref = ponto_no_frame_proprio + (DX,DY)
+ * (ou seja, offset_ref = W_proprio - W_ref).
+ */
+frame_ref(explorador1).
+
+/*
+ * Anuncia o offset_ref a cada passo (inundacao). Tres casos:
+ *  1. ja conheco meu offset_ref -> faco broadcast (para colegas derivarem o deles);
+ *  2. sou o agente de referencia e ainda nao defini -> defino (0,0);
+ *  3. ainda nao sei e nao sou a referencia -> nada (espero derivar).
+ */
++!anunciar_offset_ref : offset_ref(X, Y) <-
+    .my_name(Eu);
+    .broadcast(tell, meu_offset_ref(Eu, X, Y)).
++!anunciar_offset_ref : frame_ref(R) & .my_name(R) & not offset_ref(_, _) <-
+    +offset_ref(0, 0).
++!anunciar_offset_ref <- true.
+
+// Log quando passo a conhecer meu offset_ref.
++offset_ref(X, Y) <- .print("[FRAME] meu offset_ref = (", X, ",", Y, ")").
+
+/*
+ * Recebi o offset_ref de um colega. Se ainda nao tenho o meu E ja conheco
+ * o offset_frame ate esse colega, derivo o meu:
+ *   W_eu - W_ref = (W_eu - W_outro) + (W_outro - W_ref) = -(offset_frame) + offset_ref_outro
+ */
++meu_offset_ref(Outro, OX, OY) <-
+    .abolish(meu_offset_ref(Outro, OX, OY));
+    !derivar_offset_ref(Outro, OX, OY).
++!derivar_offset_ref(Outro, OX, OY)
+    : not offset_ref(_, _) & .my_name(Eu) & Outro \== Eu & offset_frame(Outro, DX, DY)
+    <- NX = OX - DX;  NY = OY - DY;
+       +offset_ref(NX, NY);
+       .print("[FRAME] derivei offset_ref via ", Outro).
++!derivar_offset_ref(_, _, _) <- true.
+
+
+/* ===================================================================== */
 /* DICA: COMO ENXERGAR O QUE O AGENTE ESTA "PENSANDO"                     */
 /* ===================================================================== */
 

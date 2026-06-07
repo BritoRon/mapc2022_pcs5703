@@ -78,6 +78,7 @@
     !relatar_posicao_teste;
     !registrar_descobertas;
     !identificar_companheiros;
+    !anunciar_offset_ref;
     !logar_visao;
     !escolher_acao(Acao);
     !executar(Acao);
@@ -103,13 +104,11 @@
 /* ===================================================================== */
 
 /*
- * Converte cada percepcao relativa do step em coordenada absoluta (somando
- * a posicao atual do agente) e:
- *   - guarda localmente como crenca mem_*(...) para nao reprocessar,
- *   - publica no QuadroEquipe (registrar_*) para o time inteiro enxergar.
- *
- * A dedup acontece em dois niveis: aqui (not mem_*) evita reprocessar; e no
- * QuadroEquipe.java (Sets) evita observable properties duplicadas.
+ * Converte cada percepcao relativa do step em coordenada absoluta no frame
+ * PROPRIO (somando a posicao atual) e guarda como crenca mem_*(...). A
+ * publicacao no quadro NAO e feita aqui: ela ocorre em !publicar_mapa_ref,
+ * ja re-projetada para o frame de referencia (passo 2), de modo que os
+ * mapas dos varios exploradores se fundam.
  *
  * NOTA: thing(X,Y,dispenser,Tipo), goal(X,Y) e taskboard(X,Y) sao os nomes
  * de percept que o esqueleto assume. Conferir com ../massim_2022/docs/
@@ -118,27 +117,43 @@
 +!registrar_descobertas : flag_mapear & posicao(PX, PY) <-
     for ( thing(RX, RY, dispenser, Tipo) ) {
         AX = PX + RX; AY = PY + RY;
-        if ( not mem_dispenser(AX, AY, Tipo) ) {
-            +mem_dispenser(AX, AY, Tipo);
-            registrar_dispenser(AX, AY, Tipo);
-        }
+        if ( not mem_dispenser(AX, AY, Tipo) ) { +mem_dispenser(AX, AY, Tipo); }
     }
     for ( goal(RX, RY) ) {
         AX = PX + RX; AY = PY + RY;
-        if ( not mem_goal(AX, AY) ) {
-            +mem_goal(AX, AY);
-            registrar_goal(AX, AY);
-        }
+        if ( not mem_goal(AX, AY) ) { +mem_goal(AX, AY); }
     }
     for ( taskboard(RX, RY) ) {
         AX = PX + RX; AY = PY + RY;
-        if ( not mem_taskboard(AX, AY) ) {
-            +mem_taskboard(AX, AY);
-            registrar_taskboard(AX, AY);
-        }
-    }.
+        if ( not mem_taskboard(AX, AY) ) { +mem_taskboard(AX, AY); }
+    }
+    !publicar_mapa_ref.
 // flag_mapear desligada (ou sem posicao ainda): nao faz nada.
 +!registrar_descobertas <- true.
+
+/*
+ * Publica no QuadroEquipe (no frame de REFERENCIA) as descobertas mem_ ainda
+ * nao publicadas. So roda quando offset_ref ja e conhecido; converte cada
+ * coordenada do frame proprio para o de referencia somando offset_ref. Marca
+ * com pub_* para nao republicar. Quando dois exploradores publicam o mesmo
+ * ponto fisico, sai a MESMA coordenada de referencia -> a dedup do
+ * QuadroEquipe funde os mapas.
+ */
++!publicar_mapa_ref : offset_ref(RDX, RDY) <-
+    for ( mem_dispenser(AX, AY, Tipo) & not pub_dispenser(AX, AY, Tipo) ) {
+        registrar_dispenser(AX + RDX, AY + RDY, Tipo);
+        +pub_dispenser(AX, AY, Tipo);
+    }
+    for ( mem_goal(AX, AY) & not pub_goal(AX, AY) ) {
+        registrar_goal(AX + RDX, AY + RDY);
+        +pub_goal(AX, AY);
+    }
+    for ( mem_taskboard(AX, AY) & not pub_taskboard(AX, AY) ) {
+        registrar_taskboard(AX + RDX, AY + RDY);
+        +pub_taskboard(AX, AY);
+    }.
+// offset_ref ainda desconhecido: mantem em mem_ e tenta de novo nos proximos passos.
++!publicar_mapa_ref <- true.
 
 
 /*

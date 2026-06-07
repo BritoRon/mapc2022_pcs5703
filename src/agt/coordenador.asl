@@ -81,6 +81,7 @@
     !atualizar_posicao;
     !publicar_posicao;
     !identificar_companheiros;   // coordenador parado serve de "marco" de frame
+    !anunciar_offset_ref;
     !ciclo_coordenador;
     acao_concluida.   // libera o perceiveLoop do EIS a consumir o proximo passo
 // actionID repetido (mesmo passo reprocessado pela ponte EIS): ignora.
