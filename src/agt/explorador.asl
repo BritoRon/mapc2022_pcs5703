@@ -179,12 +179,57 @@
     }.
 
 
+/* ===================================================================== */
+/* ESCOLHA DE ACAO: ESCAPE POR clear + RANDOM WALK                        */
+/* ===================================================================== */
+
 /*
- * Escolhe uma direcao aleatoria. .random/1 retorna float em [0,1).
+ * Regras auxiliares para decidir o movimento.
  *
- * IMPORTANTE: o servidor aceita os codigos de direcao "n", "s", "e", "w".
- * Eles devem ser passados como atomos Jason (sem aspas) - por isso
- * escrevemos move(n), nao move("n").
+ * celula_bloqueada(DX,DY): a celula relativa (DX,DY) tem algo que impede
+ *   o agente de entrar (obstaculo, bloco ou outra entidade).
+ * direcao_livre(D): existe uma direcao cardinal D cuja celula esta livre.
+ * obstaculo_adjacente(DX,DY): ha um obstaculo numa celula cardinal vizinha.
+ * energia_ok: energia atual >= energia_minima_seguranca (de agente_base).
+ */
+celula_bloqueada(DX,DY) :- thing(DX,DY,obstacle,_).
+celula_bloqueada(DX,DY) :- thing(DX,DY,block,_).
+celula_bloqueada(DX,DY) :- thing(DX,DY,entity,_).
+
+direcao_livre(D)        :- delta(D,DX,DY) & not celula_bloqueada(DX,DY).
+
+obstaculo_adjacente(DX,DY) :- delta(_,DX,DY) & thing(DX,DY,obstacle,_).
+
+energia_ok :- energy(E) & energia_minima_seguranca(Min) & E >= Min.
+
+/*
+ * 1) ESCAPE: o agente esta ENCURRALADO (nenhuma direcao cardinal livre)
+ *    e ha um obstaculo adjacente e energia suficiente -> cavar o obstaculo
+ *    com clear. Persiste a cada passo no MESMO obstaculo (a ordem das
+ *    delta_ e fixa: n,s,e,w) ate ele sumir - clear exige clearSteps acoes
+ *    consecutivas para resolver. Quando abrir, direcao_livre passa a valer
+ *    e cai-se no random walk, que entao consegue se mover.
+ */
++!escolher_acao(clear(DX,DY))
+    : not direcao_livre(_) & obstaculo_adjacente(DX,DY) & energia_ok
+    <- .my_name(Eu);
+       .print("[", Eu, "] ENCURRALADO; cavando obstaculo em (", DX, ",", DY, ")").
+
+/*
+ * 2) ENCURRALADO mas sem energia para cavar -> skip para recarregar
+ *    (energia regenera por passo) em vez de gastar o passo num move que
+ *    so daria failed_path.
+ */
++!escolher_acao(skip)
+    : not direcao_livre(_) & not energia_ok
+    <- .my_name(Eu);
+       .print("[", Eu, "] encurralado e sem energia; recarregando (skip).").
+
+/*
+ * 3) CASO NORMAL: random walk entre n/s/e/w.
+ *
+ * IMPORTANTE: o servidor aceita os codigos de direcao "n", "s", "e", "w"
+ * como atomos Jason (sem aspas) - por isso move(n), nao move("n").
  */
 +!escolher_acao(move(D)) <-
     .random(R);

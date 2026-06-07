@@ -2,7 +2,7 @@
     "_comentario_geral": "Configuracao do EISMASSim. Lida pelo EISAdapter (src/java/jason/eis/EISAdapter.java). Define a quem se conectar e quais entidades autenticar.",
 
     "scenario":      "assemble2022",
-    "host":          "192.168.15.10",
+    "host":          "localhost",
     "port":          12300,
 
     "_comentario_scheduling": "scheduling=true faz getPercepts BLOQUEAR ate ter percepts novos, garantindo sincronia step-a-step entre Jason e MASSim. NAO MUDE para false sem entender as implicacoes.",
