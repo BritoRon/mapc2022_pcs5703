@@ -65,7 +65,9 @@ task run (type: JavaExec, dependsOn: 'classes') {
         mkdir 'log'
     }
     mainClass = 'jacamo.infra.JaCaMoLauncher'
-    args 'mapc2022.jcm'
+    // --log-conf: usa logging por CONSOLE (sem GUI), essencial em ambiente
+    // headless para ver os .print dos agentes e erros de plano/focus.
+    args 'mapc2022.jcm', '--log-conf', 'logging-console.properties'
     classpath sourceSets.main.runtimeClasspath
     // Forca o stdout/stderr do processo JaCaMoLauncher a passar pelo
     // console do Gradle. Sem isso, em algumas versoes do Gradle 8 a saida

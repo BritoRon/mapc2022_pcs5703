@@ -56,6 +56,65 @@ energia_minima_seguranca(20).  // abaixo disso o agente prioriza recarregar
 
 
 /* ===================================================================== */
+/* FLAGS DE ATIVACAO INCREMENTAL (proximos passos do README)              */
+/* ===================================================================== */
+
+/*
+ * Os "proximos passos" do README sao construidos como esqueleto e ligados
+ * UM DE CADA VEZ por estas flags. A ideia: o baseline (random walk + skip)
+ * continua intacto; voce ACENDE um passo, testa, e so entao acende o
+ * proximo. Passos que so criam crencas/observable properties (seguros)
+ * ja vem LIGADOS; passos que enviam acoes ao servidor vem DESLIGADOS
+ * (basta descomentar para ativar).
+ */
+flag_mapear.               // passo 1: registrar mapa em coords absolutas (SEGURO, ligado)
+//flag_identificar.        // passo 2: identificar companheiros por posicao-espelho
+//flag_aceitar_tarefa.     // passo 3: coordenador aceita tarefa no taskboard
+//flag_virar_worker.       // passo 3: explorador adota papel worker e busca blocos
+//flag_submeter.           // passo 4: worker submete a tarefa numa goal zone
+
+
+/* ===================================================================== */
+/* PASSO 1 (infra): RASTREIO DE POSICAO ABSOLUTA                          */
+/* ===================================================================== */
+
+/*
+ * As percepcoes do servidor sao RELATIVAS a posicao do agente naquele step
+ * (absolutePosition: false). Para construir um mapa estavel, o agente
+ * mantem sua propria posicao num referencial absoluto cuja ORIGEM (0,0) e
+ * onde ele nasceu. A cada move bem-sucedido, somamos o deslocamento.
+ *
+ * CONVENCAO DE EIXOS (conferir em ../massim_2022/docs/scenario.md):
+ *   x cresce para LESTE (e),  y cresce para SUL (s).
+ *   Logo: n = (0,-1), s = (0,+1), e = (+1,0), w = (-1,0).
+ */
+posicao(0, 0).
+delta(n, 0, -1).
+delta(s, 0,  1).
+delta(e,  1, 0).
+delta(w, -1, 0).
+
+/*
+ * Atualiza a posicao lendo o resultado da ultima acao. So conta quando:
+ *   - a ultima acao foi um move,
+ *   - o servidor reportou success,
+ *   - foi um move de UMA direcao (lista [D]).
+ *
+ * TODO: o cenario 2022 permite move com VARIAS direcoes (ex: move(n,e)) -
+ *       lastActionParams viria [n,e]. Quando a estrategia usar isso, somar
+ *       todos os deltas em sequencia aqui.
+ */
++!atualizar_posicao
+    : lastAction(move) & lastActionResult(success)
+      & lastActionParams([D]) & delta(D, DX, DY) & posicao(X, Y)
+    <- NX = X + DX;
+       NY = Y + DY;
+       -+posicao(NX, NY).
+// Caso default: primeira jogada, acao nao foi move, ou move falhou -> nada.
++!atualizar_posicao <- true.
+
+
+/* ===================================================================== */
 /* PLANO UTILITARIO: EXECUTAR ACAO NO AMBIENTE EIS                        */
 /* ===================================================================== */
 
@@ -126,8 +185,9 @@ energia_minima_seguranca(20).  // abaixo disso o agente prioriza recarregar
     .print("SIM-END: terminamos em ", R, "o lugar.").
 
 
-// Logging do passo atual - util para debug. Comente se ficar verboso.
-//+step(S) <- .print("--- step ", S, " ---").
+// [DEBUG] Confirma que o bridge observable property -> crenca funciona para
+// os percepts do EIS (e nao so do QuadroEquipe).
++step(S) <- .print("[DBGstep] step=", S).
 
 
 /* ===================================================================== */

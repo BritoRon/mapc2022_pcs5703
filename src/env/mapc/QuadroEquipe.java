@@ -4,6 +4,11 @@ import cartago.Artifact;
 import cartago.OPERATION;
 import cartago.OpFeedbackParam;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
 /**
  * QuadroEquipe - artefato CArtAgO compartilhado pelo time.
  *
@@ -44,6 +49,31 @@ import cartago.OpFeedbackParam;
  * primeira classe, e nao apenas mensageria entre agentes.</p>
  */
 public class QuadroEquipe extends Artifact {
+
+    /*
+     * Memoria de deduplicacao do mapa compartilhado.
+     *
+     * Varios exploradores podem ver o MESMO dispenser/goal/taskboard (em
+     * passos diferentes ou ao mesmo tempo) e cada um chama registrar_*.
+     * Sem dedup, criariamos observable properties duplicadas. Estes Sets
+     * garantem que cada coordenada absoluta entra no quadro UMA unica vez.
+     *
+     * Chave: "x,y" (ou "x,y,tipo" para dispenser, pois pode haver tipos
+     * diferentes na mesma celula em mapas com wrap-around).
+     */
+    private final Set<String> dispensersVistos  = new HashSet<>();
+    private final Set<String> goalsVistas        = new HashSet<>();
+    private final Set<String> taskboardsVistos   = new HashSet<>();
+
+    /*
+     * [INSTRUMENTACAO DE TESTE - passo 1] Ultima posicao relatada por agente,
+     * usada apenas para imprimir o heartbeat de posicao quando ela MUDA (e
+     * nao a cada step). Como os .print dos agentes sao engolidos em ambiente
+     * headless, usamos System.out daqui para enxergar o passo 1 ao vivo.
+     * Pode remover este Map e os prints quando a observabilidade nao for mais
+     * necessaria.
+     */
+    private final Map<String, String> ultimaPosRelatada = new HashMap<>();
 
     /**
      * Inicializa as propriedades observaveis do quadro.
@@ -98,5 +128,74 @@ public class QuadroEquipe extends Artifact {
     @OPERATION
     void consultar_tarefa(OpFeedbackParam<String> resultado) {
         resultado.set(getObsProperty("tarefa_atual").stringValue());
+    }
+
+    /* ================================================================== */
+    /* PASSO 1: MAPA COMPARTILHADO DO TIME                                 */
+    /* ================================================================== */
+
+    /*
+     * Os exploradores convertem suas percepcoes relativas em coordenadas
+     * absolutas (origem = posicao inicial de cada um) e publicam aqui o que
+     * descobrem. Cada registro vira uma observable property, ou seja, uma
+     * crenca em TODOS os agentes que fazem focus: equipe.quadro:
+     *
+     *   dispenser_descoberto(X, Y, Tipo)
+     *   goal_descoberta(X, Y)
+     *   taskboard_descoberto(X, Y)
+     *
+     * ATENCAO (limitacao conhecida, vira TODO do passo 2): cada explorador
+     * tem sua PROPRIA origem (0,0), entao as coordenadas que eles publicam
+     * so coincidem depois que o time alinhar referenciais via identificacao
+     * de companheiros (posicao-espelho). Enquanto o passo 2 nao estiver
+     * pronto, trate estas coords como "no referencial de quem descobriu".
+     */
+
+    /** Registra um dispenser descoberto (idempotente por coordenada+tipo). */
+    @OPERATION
+    void registrar_dispenser(int x, int y, String tipo) {
+        if (dispensersVistos.add(x + "," + y + "," + tipo)) {
+            defineObsProperty("dispenser_descoberto", x, y, tipo);
+            System.out.println("[QUADRO] +dispenser(" + x + "," + y + "," + tipo
+                + ")  total=" + dispensersVistos.size());
+        }
+    }
+
+    /** Registra uma celula de goal zone descoberta (idempotente). */
+    @OPERATION
+    void registrar_goal(int x, int y) {
+        if (goalsVistas.add(x + "," + y)) {
+            defineObsProperty("goal_descoberta", x, y);
+            System.out.println("[QUADRO] +goal(" + x + "," + y
+                + ")  total=" + goalsVistas.size());
+        }
+    }
+
+    /** Registra um taskboard descoberto (idempotente). */
+    @OPERATION
+    void registrar_taskboard(int x, int y) {
+        if (taskboardsVistos.add(x + "," + y)) {
+            defineObsProperty("taskboard_descoberto", x, y);
+            System.out.println("[QUADRO] +taskboard(" + x + "," + y
+                + ")  total=" + taskboardsVistos.size());
+        }
+    }
+
+    /**
+     * [INSTRUMENTACAO DE TESTE - passo 1] Heartbeat de posicao.
+     *
+     * Os exploradores chamam isto a cada step com sua posicao absoluta
+     * (referencial proprio, origem = onde nasceram). Imprimimos so quando a
+     * posicao MUDA, o que prova ao vivo que (a) o loop de step esta rodando,
+     * (b) as percepcoes chegam e (c) o rastreio de posicao (somatorio de
+     * moves bem-sucedidos) esta funcionando.
+     */
+    @OPERATION
+    void relatar_posicao(String agente, int x, int y) {
+        String atual = x + "," + y;
+        if (!atual.equals(ultimaPosRelatada.get(agente))) {
+            ultimaPosRelatada.put(agente, atual);
+            System.out.println("[POS] " + agente + " -> (" + x + "," + y + ")");
+        }
     }
 }

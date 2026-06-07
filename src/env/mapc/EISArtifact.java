@@ -22,9 +22,8 @@ import jason.asSyntax.Term;
 
 import massim.eismassim.EnvironmentInterface;
 
-import java.util.HashSet;
+import java.util.Collection;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * EISArtifact - wrapper CArtAgO da biblioteca EISMASSim.
@@ -86,10 +85,10 @@ public class EISArtifact extends Artifact {
     void init(String entityName) {
         this.entityName = entityName;
         ensureEIStarted();
-        // Dispara o loop de percepcao em uma INTERNAL_OPERATION (executa em
-        // thread proprio do artefato, nao bloqueia o agente que iniciou o
-        // focus).
-        execInternalOp("perceiveLoop");
+        // Dispara o 1o ciclo de percepcao. Cada ciclo e UMA operacao interna
+        // que se re-agenda (ver perceiveStep) - assim as observable properties
+        // sao commitadas/propagadas aos agentes a cada passo.
+        execInternalOp("perceiveStep");
     }
 
     /**
@@ -141,30 +140,47 @@ public class EISArtifact extends Artifact {
      * loop e naturalmente cadenciado pelo ritmo da simulacao - nao precisa de
      * sleep/polling explicito.</p>
      */
+    /**
+     * UM ciclo de percepcao. Bloqueia em getPercepts ate o proximo step do
+     * servidor (scheduling=true), traduz os percepts em observable properties
+     * e entao SE RE-AGENDA via execInternalOp.
+     *
+     * <p><b>Por que uma operacao por ciclo (e nao um while(true))?</b><br>
+     * No CArtAgO, as alteracoes de observable property feitas durante uma
+     * operacao so sao COMMITADAS e propagadas aos agentes observadores quando
+     * a operacao TERMINA. Um while(true) que nunca retorna jamais commitava as
+     * obs properties - os agentes nunca recebiam +step/+actionID como crenca.
+     * Reagendando a cada passo, cada ciclo termina e propaga suas mudancas.</p>
+     */
     @INTERNAL_OPERATION
-    void perceiveLoop() {
-        while (true) {
-            try {
-                Map<String, PerceptUpdate> perMap = ei.getPercepts(entityName);
-                PerceptUpdate update = perMap.get(entityName);
-                if (update != null) {
-                    // Primeiro removemos as percepcoes que sairam de cena
-                    for (Percept p : update.getDeleteList()) {
-                        removePercept(p);
-                    }
-                    // Depois adicionamos as novas
-                    for (Percept p : update.getAddList()) {
-                        addPercept(p);
-                    }
+    void perceiveStep() {
+        try {
+            Collection<String> entities = ei.getAssociatedEntities(entityName);
+            Map<String, PerceptUpdate> perMap =
+                ei.getPercepts(entityName, entities.toArray(new String[0]));
+
+            for (String ent : entities) {
+                PerceptUpdate update = perMap.get(ent);
+                if (update == null) continue;
+
+                // Primeiro removemos as percepcoes que sairam de cena
+                for (Percept p : update.getDeleteList()) {
+                    removePercept(p);
                 }
-            } catch (Exception ex) {
-                // Falhou: provavelmente o servidor caiu ou estamos sendo
-                // encerrados. Logar uma vez por agente e sair do loop.
-                System.err.println("[EISArtifact:" + entityName + "] perceiveLoop encerrado: "
-                                   + ex.getMessage());
-                break;
+                // Depois adicionamos as novas
+                for (Percept p : update.getAddList()) {
+                    addPercept(p);
+                }
             }
+        } catch (Exception ex) {
+            // Servidor caiu / encerrando: loga e NAO re-agenda (encerra o loop).
+            System.err.println("[EISArtifact:" + entityName + "] perceiveStep encerrado: "
+                               + ex.getMessage());
+            return;
         }
+        // Re-agenda o proximo ciclo como uma NOVA operacao interna, garantindo
+        // que as obs properties deste ciclo sejam commitadas antes da proxima.
+        execInternalOp("perceiveStep");
     }
 
     /**
@@ -177,8 +193,16 @@ public class EISArtifact extends Artifact {
         try {
             defineObsProperty(p.getName(), params);
         } catch (Exception e) {
-            // CArtAgO pode reclamar se ja existir um obs property com mesmo
-            // nome+aridade+valores. Em caso de duplicata, ignoramos.
+            // [DEBUG] revela falhas de defineObsProperty (antes engolidas).
+            // Mostra o tipo de cada param para diagnosticar incompatibilidade.
+            StringBuilder tipos = new StringBuilder();
+            for (Object o : params) {
+                tipos.append(o == null ? "null" : o.getClass().getSimpleName());
+                tipos.append("=").append(o).append(" ");
+            }
+            System.out.println("[ADDFAIL:" + entityName + "] " + p.getName()
+                + "/" + params.length + " : " + e.getClass().getSimpleName()
+                + " : " + e.getMessage() + " | params: " + tipos);
         }
     }
 

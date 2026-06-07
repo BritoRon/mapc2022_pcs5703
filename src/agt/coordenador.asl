@@ -73,15 +73,49 @@
  * o novo actionID, ele tem ate "deadline" milissegundos para retornar uma
  * acao. Se nao mandar nada, o servidor conta como "skip".
  *
- * Estrategia para o esqueleto: o coordenador apenas registra as tarefas
- * disponiveis e manda skip. Logica real (escolher e aceitar tarefa)
- * pode ser desenvolvida nas iteracoes seguintes.
+ * O coordenador atualiza sua posicao e roda o ciclo de decisao. So pode
+ * sair UMA acao por step, entao o ciclo OU aceita uma tarefa OU manda skip.
  */
 +actionID(_) <-
-    // Coleta todas as tarefas disponiveis para inspecao
+    !atualizar_posicao;
+    !ciclo_coordenador.
+
+
+/* ===================================================================== */
+/* PASSO 3 (lado coordenador): ESCOLHER E ACEITAR TAREFA                  */
+/* ===================================================================== */
+
+/*
+ * Caminho "feliz" (so ativo com flag_aceitar_tarefa): se ainda nao
+ * aceitamos nenhuma tarefa e existe uma elegivel num taskboard adjacente,
+ * aceita, registra e anuncia ao time pelo QuadroEquipe.
+ */
++!ciclo_coordenador
+    : flag_aceitar_tarefa & not tarefa_aceita(_) & escolher_tarefa(Task)
+    <- .print("Coordenador aceitando tarefa '", Task, "'.");
+       !executar(accept(Task));
+       +tarefa_aceita(Task);
+       anunciar_tarefa(Task).
+
+// Fallback (sempre disponivel): nada a aceitar agora -> skip para nao
+// perder o passo. Mantem o baseline enquanto flag_aceitar_tarefa estiver
+// desligada.
++!ciclo_coordenador <-
     .findall(task(N,D,R,Req), task(N,D,R,Req), Tarefas);
     .length(Tarefas, Qtd);
     if (Qtd > 0) {
         .print(Qtd, " tarefa(s) disponivel(eis). TODO: escolher uma.");
     }
     !executar(skip).
+
+/*
+ * Heuristica de escolha de tarefa. ESQUELETO: pega a primeira task visivel
+ * SE houver um taskboard adjacente (a acao accept exige proximidade).
+ *
+ * TODO passo 3 (item 5 do relatorio): priorizar tasks pequenas (LTI-USP
+ *   §3.4), considerar deadline e reward decay (GOAL-DTU 2021), e leiloar
+ *   entre workers quem esta mais perto dos blocos (JaCaMo Builders §4.1).
+ */
+escolher_tarefa(Task) :-
+    task(Task, _, _, _) &
+    taskboard(TX, TY) & (math.abs(TX) + math.abs(TY)) <= 1.
