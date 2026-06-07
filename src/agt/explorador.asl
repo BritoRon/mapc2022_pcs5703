@@ -208,6 +208,34 @@ obstaculo_adjacente(DX,DY) :- delta(_,DX,DY) & thing(DX,DY,obstacle,_).
 energia_ok :- energy(E) & energia_minima_seguranca(Min) & E >= Min.
 
 /*
+ * ALVOS CONHECIDOS no FRAME PROPRIO. Refinamento: alem do que o agente viu
+ * pessoalmente (mem_*), usa o MAPA COMPARTILHADO (frame de referencia,
+ * dispenser_descoberto/goal_descoberta/rolezone_descoberta) convertendo para
+ * o frame proprio via offset_ref. Assim um worker pode ir ao dispenser que
+ * OUTRO agente achou.
+ *   ponto_proprio = ponto_ref - offset_ref
+ */
+disp_conhecido(T, X, Y) :- mem_dispenser(X, Y, T).
+disp_conhecido(T, X, Y) :- dispenser_descoberto(RX, RY, T) & offset_ref(RDX, RDY)
+                           & X = RX - RDX & Y = RY - RDY.
+
+goalzone_conhecida(X, Y) :- mem_goalzone(X, Y).
+goalzone_conhecida(X, Y) :- goal_descoberta(RX, RY) & offset_ref(RDX, RDY)
+                            & X = RX - RDX & Y = RY - RDY.
+
+rolezone_conhecida(X, Y) :- mem_rolezone(X, Y).
+rolezone_conhecida(X, Y) :- rolezone_descoberta(RX, RY) & offset_ref(RDX, RDY)
+                            & X = RX - RDX & Y = RY - RDY.
+
+/*
+ * ANTI-OSCILACAO: a direcao D leva de volta a celula de onde acabei de vir?
+ * livre_ok(D): direcao livre que NAO volta atras (preferida na navegacao).
+ */
+volta_atras(D) :- delta(D, DX, DY) & posicao(X, Y) & pos_anterior(PX, PY)
+                  & PX == X + DX & PY == Y + DY.
+livre_ok(D)    :- direcao_livre(D) & not volta_atras(D).
+
+/*
  * ESCOLHA DE ACAO (prioridade):
  *   1) Se sou worker e ha task-alvo -> logica do worker (acao_worker).
  *   2) Caso contrario -> exploracao dirigida (que tambem cava obstaculos
@@ -219,50 +247,54 @@ energia_ok :- energy(E) & energia_minima_seguranca(Min) & E >= Min.
     !explorar(Acao).
 
 /* --------------------------------------------------------------------- */
-/* EXPLORACAO DIRIGIDA (cobertura/rendezvous)                            */
+/* EXPLORACAO DIRIGIDA (cobertura/rendezvous, com anti-oscilacao)        */
 /* --------------------------------------------------------------------- */
 /*
- * Em vez de random walk puro, mantem um RUMO e segue nele enquanto a
- * celula a frente estiver livre - cobre mais terreno e aumenta a chance
- * de encontros (rendezvous), facilitando o alinhamento de frames (passo 2).
- * Ao bater em algo, sorteia um novo rumo livre. Se encurralado, cava.
+ * Mantem um RUMO e segue nele enquanto livre e sem voltar atras (cobre
+ * mais terreno e favorece encontros). Ao bater/oscilar, sorteia novo rumo,
+ * preferindo direcoes que NAO voltam a celula anterior. Encurralado: cava.
  */
-+!explorar(move(Dir)) : rumo(Dir) & direcao_livre(Dir) <- true.
-+!explorar(move(Dir)) : direcao_livre(_) <-
-    !dir_livre_aleatoria(Dir);
-    -+rumo(Dir).
++!explorar(move(Dir)) : rumo(Dir) & livre_ok(Dir) <- true.
++!explorar(move(Dir)) : livre_ok(_) <-
+    !dir_livre_ok_aleatoria(Dir);  -+rumo(Dir).
++!explorar(move(Dir)) : direcao_livre(_) <-      // so volta atras se nao ha outra
+    !dir_livre_aleatoria(Dir);     -+rumo(Dir).
 +!explorar(clear(DX,DY)) : obstaculo_adjacente(DX,DY) & energia_ok <-
     .my_name(Eu);
     .print("[", Eu, "] ENCURRALADO; cavando obstaculo em (", DX, ",", DY, ")").
 +!explorar(skip) <- true.
 
++!dir_livre_ok_aleatoria(Dir) <-
+    .findall(D, livre_ok(D), L);
+    .length(L, N);  .random(R);  I = math.floor(R * N);  .nth(I, L, Dir).
 +!dir_livre_aleatoria(Dir) <-
     .findall(D, direcao_livre(D), L);
-    .length(L, N);
-    .random(R);
-    I = math.floor(R * N);
-    .nth(I, L, Dir).
+    .length(L, N);  .random(R);  I = math.floor(R * N);  .nth(I, L, Dir).
 
 /* --------------------------------------------------------------------- */
 /* NAVEGACAO GULOSA rumo a um alvo (TX,TY) no frame proprio              */
 /* --------------------------------------------------------------------- */
-+!mover_rumo(TX, TY, move(Dir)) : posicao(X, Y) <-
+// ha alguma saida -> escolhe direcao (dir_gulosa sempre acha uma); senao explora.
++!mover_rumo(TX, TY, move(Dir)) : direcao_livre(_) & posicao(X, Y) <-
     DX = TX - X;  DY = TY - Y;
     !dir_gulosa(DX, DY, Dir).
-// sem direcao gulosa livre -> explora (inclui cavar se encurralado)
 +!mover_rumo(_, _, Acao) <-
     !explorar(Acao).
 
-// prefere o eixo de maior deslocamento; se bloqueado, tenta o outro eixo.
-+!dir_gulosa(DX, DY, e) : DX > 0 & math.abs(DX) >= math.abs(DY) & direcao_livre(e) <- true.
-+!dir_gulosa(DX, DY, w) : DX < 0 & math.abs(DX) >= math.abs(DY) & direcao_livre(w) <- true.
-+!dir_gulosa(DX, DY, s) : DY > 0 & math.abs(DY) >  math.abs(DX) & direcao_livre(s) <- true.
-+!dir_gulosa(DX, DY, n) : DY < 0 & math.abs(DY) >  math.abs(DX) & direcao_livre(n) <- true.
-+!dir_gulosa(_,  DY, s) : DY > 0 & direcao_livre(s) <- true.
-+!dir_gulosa(_,  DY, n) : DY < 0 & direcao_livre(n) <- true.
-+!dir_gulosa(DX, _,  e) : DX > 0 & direcao_livre(e) <- true.
-+!dir_gulosa(DX, _,  w) : DX < 0 & direcao_livre(w) <- true.
-// (nenhum aplicavel -> o goal !dir_gulosa falha e mover_rumo cai em !explorar)
+// 1) eixo dominante, livre e sem voltar atras
++!dir_gulosa(DX, DY, e) : DX > 0 & math.abs(DX) >= math.abs(DY) & livre_ok(e) <- true.
++!dir_gulosa(DX, DY, w) : DX < 0 & math.abs(DX) >= math.abs(DY) & livre_ok(w) <- true.
++!dir_gulosa(DX, DY, s) : DY > 0 & math.abs(DY) >  math.abs(DX) & livre_ok(s) <- true.
++!dir_gulosa(DX, DY, n) : DY < 0 & math.abs(DY) >  math.abs(DX) & livre_ok(n) <- true.
+// 2) a outra direcao util, livre e sem voltar atras
++!dir_gulosa(DX, _,  e) : DX > 0 & livre_ok(e) <- true.
++!dir_gulosa(DX, _,  w) : DX < 0 & livre_ok(w) <- true.
++!dir_gulosa(_,  DY, s) : DY > 0 & livre_ok(s) <- true.
++!dir_gulosa(_,  DY, n) : DY < 0 & livre_ok(n) <- true.
+// 3) qualquer direcao livre sem voltar atras
++!dir_gulosa(_, _, D) : livre_ok(D) <- true.
+// 4) ultima opcao: qualquer direcao livre (pode voltar atras) - garante saida
++!dir_gulosa(_, _, D) : direcao_livre(D) <- true.
 
 
 /* ===================================================================== */
@@ -298,8 +330,8 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 /* ---- FASE A: adotar o papel de cenario "worker" (precisa de role zone) ---- */
 // estou sobre um role zone -> adopt(worker)
 +!acao_worker(_, _, _, _, adopt(worker)) : not role(worker) & roleZone(0,0) <- true.
-// conheco um role zone -> navego ate ele
-+!acao_worker(_, _, _, _, Acao) : not role(worker) & mem_rolezone(TX,TY) <-
+// conheco um role zone (proprio ou do mapa compartilhado) -> navego ate ele
++!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_conhecida(TX,TY) <-
     !mover_rumo(TX, TY, Acao).
 // nao conheco role zone -> exploro para achar um
 +!acao_worker(_, _, _, _, Acao) : not role(worker) <-
@@ -318,9 +350,10 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
        .my_name(Eu); .print("[WORKER] ", Eu, " anexou bloco ", T, " em (", QX, ",", QY, ")").
 // pedi mas o bloco ainda nao apareceu -> espera
 +!acao_worker(_, _, _, _, skip) : role(worker) & not carregando(_) & pedi_bloco(_) <- true.
-// conheco um dispenser do tipo -> navego para a celula que poe o dispenser em (QX,QY)
+// conheco um dispenser do tipo (proprio ou compartilhado) -> navego para a
+// celula que poe o dispenser em (QX,QY)
 +!acao_worker(_, QX, QY, T, Acao)
-    : role(worker) & not carregando(_) & mem_dispenser(DXa, DYa, T)
+    : role(worker) & not carregando(_) & disp_conhecido(T, DXa, DYa)
     <- TXa = DXa - QX;  TYa = DYa - QY;
        !mover_rumo(TXa, TYa, Acao).
 // nao conheco dispenser do tipo -> exploro
@@ -332,8 +365,8 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 +!acao_worker(N, _, _, _, submit(N))
     : role(worker) & carregando(_) & goalZone(0,0) & flag_submeter
     <- .my_name(Eu); .print("[WORKER] ", Eu, " em goal zone - submetendo ", N).
-// conheco uma goal zone -> navego ate ela
-+!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & mem_goalzone(TX,TY) <-
+// conheco uma goal zone (propria ou compartilhada) -> navego ate ela
++!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_conhecida(TX,TY) <-
     !mover_rumo(TX, TY, Acao).
 // nao conheco goal zone -> exploro
 +!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) <-

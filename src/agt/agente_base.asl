@@ -115,7 +115,8 @@ delta(w, -1, 0).
 +!atualizar_posicao
     : lastAction(move) & lastActionResult(success)
       & lastActionParams([D]) & delta(D, DX, DY) & posicao(X, Y)
-    <- NX = X + DX;
+    <- -+pos_anterior(X, Y);   // de onde vim (anti-oscilacao na navegacao)
+       NX = X + DX;
        NY = Y + DY;
        -+posicao(NX, NY).
 // Caso default: primeira jogada, acao nao foi move, ou move falhou -> nada.
