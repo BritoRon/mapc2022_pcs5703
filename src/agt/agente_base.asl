@@ -76,7 +76,7 @@ ultimo_action_id(-1).
  * (basta descomentar para ativar).
  */
 flag_mapear.               // passo 1: registrar mapa em coords absolutas (SEGURO, ligado)
-//flag_identificar.        // passo 2: identificar companheiros por posicao-espelho
+flag_identificar.          // passo 2: identificar companheiros por posicao-espelho (LIGADO)
 //flag_aceitar_tarefa.     // passo 3: coordenador aceita tarefa no taskboard
 //flag_virar_worker.       // passo 3: explorador adota papel worker e busca blocos
 //flag_submeter.           // passo 4: worker submete a tarefa numa goal zone
@@ -196,6 +196,82 @@ delta(w, -1, 0).
 // [DEBUG] Confirma que o bridge observable property -> crenca funciona para
 // os percepts do EIS (e nao so do QuadroEquipe).
 +step(S) <- .print("[DBGstep] step=", S).
+
+
+/* ===================================================================== */
+/* PASSO 2: POSICAO COMPARTILHADA + IDENTIFICACAO POR POSICAO-ESPELHO     */
+/* ===================================================================== */
+
+/*
+ * Publica a propria posicao (frame proprio) no QuadroEquipe a cada passo.
+ * Vira a crenca pos_agente(Nome,X,Y) em todos os agentes do time.
+ */
++!publicar_posicao : posicao(X, Y) <-
+    .my_name(Eu);
+    atualizar_pos_agente(Eu, X, Y).
++!publicar_posicao <- true.
+
+/*
+ * IDENTIFICACAO DE COMPANHEIROS (posicao-espelho).
+ *
+ * Cada frame tem origem (0,0) no spawn do agente. Se o agente i ve o colega
+ * j em (rx,ry), entao j ve i em (-rx,-ry) (espelho). Trocando posicoes por
+ * mensagem, calcula-se o offset entre os frames:
+ *
+ *   offset(j->i) = (rx,ry) + posicao_i - posicao_j     // ponto no frame de j
+ *                                                       // + offset = ponto no frame de i
+ *
+ * Como i nao sabe QUEM viu, faz broadcast da observacao; quem se reconhece
+ * pelo espelho responde com sua identidade/posicao e ja devolve o offset.
+ */
++!identificar_companheiros : flag_identificar & team(MeuTime) & posicao(X, Y) <-
+    .findall(c(RX, RY),
+             (thing(RX, RY, entity, MeuTime) & (RX \== 0 | RY \== 0)),
+             Colegas);
+    !tratar_avistamento(Colegas, X, Y).
++!identificar_companheiros <- true.
+
+// Exatamente UM colega a vista -> anuncia a observacao ao time.
++!tratar_avistamento([c(RX, RY)], X, Y) <-
+    .my_name(Eu);
+    .broadcast(tell, avistei_colega(Eu, X, Y, RX, RY)).
+// Zero ou varios colegas -> ambiguo, nao tenta alinhar agora.
++!tratar_avistamento(_, _, _) <- true.
+
+/*
+ * Recebi o anuncio de um colega. Consome o sinal e processa (separado para
+ * que o sinal seja sempre limpo, mesmo se o reconhecimento falhar).
+ */
++avistei_colega(Outro, OX, OY, ORX, ORY) <-
+    .abolish(avistei_colega(Outro, OX, OY, ORX, ORY));
+    !processar_avistamento(Outro, OX, OY, ORX, ORY).
+
+/*
+ * Reconheco o Outro SE eu vejo um colega exatamente no espelho (-ORX,-ORY).
+ * Entao calculo meu offset (frame do Outro -> meu) e devolvo a ele o offset
+ * inverso (meu frame -> frame dele), para ambos alinharem.
+ */
++!processar_avistamento(Outro, OX, OY, ORX, ORY)
+    : flag_identificar & .my_name(Eu) & Outro \== Eu
+      & team(MeuTime) & posicao(MX, MY)
+      & MRX = 0 - ORX & MRY = 0 - ORY
+      & thing(MRX, MRY, entity, MeuTime)
+    <- DX = MRX + MX - OX;   DY = MRY + MY - OY;     // frame(Outro) -> meu frame
+       -+offset_frame(Outro, DX, DY);
+       RDX = OX - MX - MRX;  RDY = OY - MY - MRY;    // meu frame -> frame(Outro)
+       .send(Outro, tell, seu_offset(Eu, RDX, RDY));
+       .print("[ESPELHO] reconheci ", Outro,
+              "; offset(", Outro, "->eu)=(", DX, ",", DY, ")").
+// Nao reconheci (nao vejo no espelho ou ja me movi): ignora.
++!processar_avistamento(_, _, _, _, _) <- true.
+
+/*
+ * O colega me devolveu o offset do MEU frame para o frame dele. Guardo.
+ */
++seu_offset(Outro, DX, DY) <-
+    .abolish(seu_offset(Outro, DX, DY));
+    -+offset_frame(Outro, DX, DY);
+    .print("[ESPELHO] recebi offset: frame(", Outro, ")->meu = (", DX, ",", DY, ")").
 
 
 /* ===================================================================== */

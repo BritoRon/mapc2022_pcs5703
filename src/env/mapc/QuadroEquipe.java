@@ -3,6 +3,7 @@ package mapc;
 import cartago.Artifact;
 import cartago.OPERATION;
 import cartago.OpFeedbackParam;
+import cartago.ObsProperty;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -74,6 +75,13 @@ public class QuadroEquipe extends Artifact {
      * necessaria.
      */
     private final Map<String, String> ultimaPosRelatada = new HashMap<>();
+
+    /*
+     * [Passo 2] Posicao publicada por cada agente (no frame proprio dele).
+     * Mantemos a referencia da ObsProperty por agente para atualizar em vez
+     * de duplicar. Vira a crenca pos_agente(Nome,X,Y) em todos os focados.
+     */
+    private final Map<String, ObsProperty> posAgentes = new HashMap<>();
 
     /**
      * Inicializa as propriedades observaveis do quadro.
@@ -178,6 +186,21 @@ public class QuadroEquipe extends Artifact {
             defineObsProperty("taskboard_descoberto", x, y);
             System.out.println("[QUADRO] +taskboard(" + x + "," + y
                 + ")  total=" + taskboardsVistos.size());
+        }
+    }
+
+    /**
+     * [Passo 2] Publica/atualiza a posicao de um agente (no frame proprio).
+     * Todos os agentes focados passam a ver pos_agente(Nome,X,Y) como crenca.
+     * Base para coordenacao e para o alinhamento de frames (posicao-espelho).
+     */
+    @OPERATION
+    void atualizar_pos_agente(String nome, int x, int y) {
+        ObsProperty op = posAgentes.get(nome);
+        if (op == null) {
+            posAgentes.put(nome, defineObsProperty("pos_agente", nome, x, y));
+        } else {
+            op.updateValues(nome, x, y);
         }
     }
 

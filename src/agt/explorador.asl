@@ -74,6 +74,7 @@
     .findall(t(S, TS, DL), (step(S) & timestamp(TS) & deadline(DL)), TL);
     .print("[DBGres] ", LAR, " | step/ts/deadline: ", TL);
     !atualizar_posicao;
+    !publicar_posicao;
     !relatar_posicao_teste;
     !registrar_descobertas;
     !identificar_companheiros;
@@ -140,29 +141,12 @@
 +!registrar_descobertas <- true.
 
 
-/* ===================================================================== */
-/* PASSO 2: IDENTIFICACAO DE COMPANHEIROS (POSICAO-ESPELHO)               */
-/* ===================================================================== */
-
 /*
- * Quando dois agentes do mesmo time se enxergam, cada um ve o outro como
- * thing(RX,RY,entity,MeuTime). Como a visao e simetrica, da pra inferir a
- * posicao-espelho e ALINHAR os referenciais (origens (0,0) distintas) dos
- * dois agentes - condicao necessaria para fundir os mapas publicados no
- * QuadroEquipe.
- *
- * TODO passo 2 (ver LTI-USP §3.2): casar candidatos por posicao-espelho,
- *   trocar mensagens .send para confirmar identidade e calcular o offset
- *   (DX,DY) entre os referenciais; depois reprojetar as crencas mem_ e o quadro.
+ * PASSO 2 (identificacao de companheiros por posicao-espelho) agora e
+ * compartilhado: os planos !identificar_companheiros, !publicar_posicao e os
+ * handlers de mensagem (avistei_colega/seu_offset) ficam em agente_base.asl,
+ * pois tanto exploradores quanto o coordenador participam do alinhamento.
  */
-+!identificar_companheiros : flag_identificar & team(MeuTime) <-
-    // Candidatos: entidades do MEU time visiveis neste step (coords relativas).
-    .findall(ent(RX, RY), thing(RX, RY, entity, MeuTime), Colegas);
-    // TODO passo 2: descartar a si mesmo, casar por posicao-espelho,
-    //   confirmar via .send e calcular o offset entre os referenciais.
-    .length(Colegas, _).
-// flag_identificar desligada: nao faz nada (default seguro).
-+!identificar_companheiros <- true.
 
 
 /*

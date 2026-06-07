@@ -79,6 +79,8 @@
 +actionID(ID) : ultimo_action_id(Last) & ID \== Last <-
     -+ultimo_action_id(ID);
     !atualizar_posicao;
+    !publicar_posicao;
+    !identificar_companheiros;   // coordenador parado serve de "marco" de frame
     !ciclo_coordenador;
     acao_concluida.   // libera o perceiveLoop do EIS a consumir o proximo passo
 // actionID repetido (mesmo passo reprocessado pela ponte EIS): ignora.
