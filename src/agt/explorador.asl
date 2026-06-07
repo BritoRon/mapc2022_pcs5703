@@ -110,22 +110,24 @@
  * ja re-projetada para o frame de referencia (passo 2), de modo que os
  * mapas dos varios exploradores se fundam.
  *
- * NOTA: thing(X,Y,dispenser,Tipo), goal(X,Y) e taskboard(X,Y) sao os nomes
- * de percept que o esqueleto assume. Conferir com ../massim_2022/docs/
- * scenario.md - se o cenario usar outro nome (ex: goalZone), ajustar aqui.
+ * NOMES DE PERCEPT (MAPC 2022, confirmados em docs/eismassim.md):
+ *   dispenser -> thing(X,Y,dispenser,Tipo)
+ *   goal zone -> goalZone(X,Y)
+ *   role zone -> roleZone(X,Y)
+ * (NAO existe taskboard nem goal(X,Y) no 2022 - isso era do cenario 2021.)
  */
 +!registrar_descobertas : flag_mapear & posicao(PX, PY) <-
     for ( thing(RX, RY, dispenser, Tipo) ) {
         AX = PX + RX; AY = PY + RY;
         if ( not mem_dispenser(AX, AY, Tipo) ) { +mem_dispenser(AX, AY, Tipo); }
     }
-    for ( goal(RX, RY) ) {
+    for ( goalZone(RX, RY) ) {
         AX = PX + RX; AY = PY + RY;
-        if ( not mem_goal(AX, AY) ) { +mem_goal(AX, AY); }
+        if ( not mem_goalzone(AX, AY) ) { +mem_goalzone(AX, AY); }
     }
-    for ( taskboard(RX, RY) ) {
+    for ( roleZone(RX, RY) ) {
         AX = PX + RX; AY = PY + RY;
-        if ( not mem_taskboard(AX, AY) ) { +mem_taskboard(AX, AY); }
+        if ( not mem_rolezone(AX, AY) ) { +mem_rolezone(AX, AY); }
     }
     !publicar_mapa_ref.
 // flag_mapear desligada (ou sem posicao ainda): nao faz nada.
@@ -144,13 +146,13 @@
         registrar_dispenser(AX + RDX, AY + RDY, Tipo);
         +pub_dispenser(AX, AY, Tipo);
     }
-    for ( mem_goal(AX, AY) & not pub_goal(AX, AY) ) {
+    for ( mem_goalzone(AX, AY) & not pub_goalzone(AX, AY) ) {
         registrar_goal(AX + RDX, AY + RDY);
-        +pub_goal(AX, AY);
+        +pub_goalzone(AX, AY);
     }
-    for ( mem_taskboard(AX, AY) & not pub_taskboard(AX, AY) ) {
-        registrar_taskboard(AX + RDX, AY + RDY);
-        +pub_taskboard(AX, AY);
+    for ( mem_rolezone(AX, AY) & not pub_rolezone(AX, AY) ) {
+        registrar_rolezone(AX + RDX, AY + RDY);
+        +pub_rolezone(AX, AY);
     }.
 // offset_ref ainda desconhecido: mantem em mem_ e tenta de novo nos proximos passos.
 +!publicar_mapa_ref <- true.
@@ -170,17 +172,15 @@
  */
 +!logar_visao <-
     .findall(d(X,Y,T), thing(X,Y,dispenser,T), Disp);
-    .findall(g(X,Y),   goal(X,Y),               Goals);
-    .findall(t(X,Y),   taskboard(X,Y),          Tbds);
-    // .length precisa ser chamado como acao (resultado numa variavel);
-    // NAO pode ser embutido como termo dentro do .print.
+    .findall(g(X,Y),   goalZone(X,Y),           Goals);
+    .findall(z(X,Y),   roleZone(X,Y),           RZs);
     .length(Disp, ND);
     .length(Goals, NG);
-    .length(Tbds, NT);
-    if (ND > 0 | NG > 0 | NT > 0) {
+    .length(RZs,  NZ);
+    if (ND > 0 | NG > 0 | NZ > 0) {
         .my_name(Eu);
         .print("[", Eu, "] vejo ", ND, " dispenser(s), ",
-               NG, " goal(s), ", NT, " taskboard(s)");
+               NG, " goal zone(s), ", NZ, " role zone(s)");
     }.
 
 
@@ -208,98 +208,136 @@ obstaculo_adjacente(DX,DY) :- delta(_,DX,DY) & thing(DX,DY,obstacle,_).
 energia_ok :- energy(E) & energia_minima_seguranca(Min) & E >= Min.
 
 /*
- * 1) ESCAPE: o agente esta ENCURRALADO (nenhuma direcao cardinal livre)
- *    e ha um obstaculo adjacente e energia suficiente -> cavar o obstaculo
- *    com clear. Persiste a cada passo no MESMO obstaculo (a ordem das
- *    delta_ e fixa: n,s,e,w) ate ele sumir - clear exige clearSteps acoes
- *    consecutivas para resolver. Quando abrir, direcao_livre passa a valer
- *    e cai-se no random walk, que entao consegue se mover.
+ * ESCOLHA DE ACAO (prioridade):
+ *   1) Se sou worker e ha task-alvo -> logica do worker (acao_worker).
+ *   2) Caso contrario -> exploracao dirigida (que tambem cava obstaculos
+ *      se estiver encurralado).
  */
-+!escolher_acao(clear(DX,DY))
-    : not direcao_livre(_) & obstaculo_adjacente(DX,DY) & energia_ok
-    <- .my_name(Eu);
-       .print("[", Eu, "] ENCURRALADO; cavando obstaculo em (", DX, ",", DY, ")").
++!escolher_acao(Acao) : sou_worker & tarefa_alvo(N,QX,QY,T) <-
+    !acao_worker(N, QX, QY, T, Acao).
++!escolher_acao(Acao) <-
+    !explorar(Acao).
 
+/* --------------------------------------------------------------------- */
+/* EXPLORACAO DIRIGIDA (cobertura/rendezvous)                            */
+/* --------------------------------------------------------------------- */
 /*
- * 2) ENCURRALADO mas sem energia para cavar -> skip para recarregar
- *    (energia regenera por passo) em vez de gastar o passo num move que
- *    so daria failed_path.
+ * Em vez de random walk puro, mantem um RUMO e segue nele enquanto a
+ * celula a frente estiver livre - cobre mais terreno e aumenta a chance
+ * de encontros (rendezvous), facilitando o alinhamento de frames (passo 2).
+ * Ao bater em algo, sorteia um novo rumo livre. Se encurralado, cava.
  */
-+!escolher_acao(skip)
-    : not direcao_livre(_) & not energia_ok
-    <- .my_name(Eu);
-       .print("[", Eu, "] encurralado e sem energia; recarregando (skip).").
++!explorar(move(Dir)) : rumo(Dir) & direcao_livre(Dir) <- true.
++!explorar(move(Dir)) : direcao_livre(_) <-
+    !dir_livre_aleatoria(Dir);
+    -+rumo(Dir).
++!explorar(clear(DX,DY)) : obstaculo_adjacente(DX,DY) & energia_ok <-
+    .my_name(Eu);
+    .print("[", Eu, "] ENCURRALADO; cavando obstaculo em (", DX, ",", DY, ")").
++!explorar(skip) <- true.
 
-/*
- * 3) CASO NORMAL: random walk entre n/s/e/w.
- *
- * IMPORTANTE: o servidor aceita os codigos de direcao "n", "s", "e", "w"
- * como atomos Jason (sem aspas) - por isso move(n), nao move("n").
- */
-+!escolher_acao(move(D)) <-
++!dir_livre_aleatoria(Dir) <-
+    .findall(D, direcao_livre(D), L);
+    .length(L, N);
     .random(R);
-    if (R < 0.25)      { D = n; }
-    elif (R < 0.50)    { D = s; }
-    elif (R < 0.75)    { D = e; }
-    else               { D = w; }.
+    I = math.floor(R * N);
+    .nth(I, L, Dir).
+
+/* --------------------------------------------------------------------- */
+/* NAVEGACAO GULOSA rumo a um alvo (TX,TY) no frame proprio              */
+/* --------------------------------------------------------------------- */
++!mover_rumo(TX, TY, move(Dir)) : posicao(X, Y) <-
+    DX = TX - X;  DY = TY - Y;
+    !dir_gulosa(DX, DY, Dir).
+// sem direcao gulosa livre -> explora (inclui cavar se encurralado)
++!mover_rumo(_, _, Acao) <-
+    !explorar(Acao).
+
+// prefere o eixo de maior deslocamento; se bloqueado, tenta o outro eixo.
++!dir_gulosa(DX, DY, e) : DX > 0 & math.abs(DX) >= math.abs(DY) & direcao_livre(e) <- true.
++!dir_gulosa(DX, DY, w) : DX < 0 & math.abs(DX) >= math.abs(DY) & direcao_livre(w) <- true.
++!dir_gulosa(DX, DY, s) : DY > 0 & math.abs(DY) >  math.abs(DX) & direcao_livre(s) <- true.
++!dir_gulosa(DX, DY, n) : DY < 0 & math.abs(DY) >  math.abs(DX) & direcao_livre(n) <- true.
++!dir_gulosa(_,  DY, s) : DY > 0 & direcao_livre(s) <- true.
++!dir_gulosa(_,  DY, n) : DY < 0 & direcao_livre(n) <- true.
++!dir_gulosa(DX, _,  e) : DX > 0 & direcao_livre(e) <- true.
++!dir_gulosa(DX, _,  w) : DX < 0 & direcao_livre(w) <- true.
+// (nenhum aplicavel -> o goal !dir_gulosa falha e mover_rumo cai em !explorar)
 
 
 /* ===================================================================== */
-/* PASSO 3 (lado worker): REAGIR AO ANUNCIO DE TAREFA E VIRAR WORKER      */
+/* PASSO 3: WORKER - BUSCAR BLOCO, LEVAR A GOAL ZONE E SUBMETER           */
 /* ===================================================================== */
 
 /*
- * Quando o coordenador chama anunciar_tarefa(Task) no QuadroEquipe, a
- * observable property tarefa_atual muda e TODOS os agentes focados recebem
- * +tarefa_atual(Task). O explorador reage promovendo-se a worker.
+ * Quando o coordenador anuncia tarefa_alvo(N,QX,QY,T) no QuadroEquipe, o
+ * explorador se promove a worker (sou_worker). Daí em diante, acao_worker
+ * conduz a maquina de estados a cada passo.
  *
- * A compatibility from="explorer" to="worker" no org.xml e o que PERMITE
- * acumular o papel social; o adopt(...) de cenario MASSim e o que muda as
- * acoes fisicas disponiveis no jogo.
+ * Modelo MAPC 2022 (sem accept/taskboard): escolher task -> juntar bloco
+ * (request+attach num dispenser) -> levar a uma goal zone -> submit.
+ *
+ * LIMITACOES conhecidas (single-block, papeis padrao):
+ *  - so tratamos tasks de 1 bloco com requisito em celula cardinal
+ *    adjacente (|QX|+|QY|=1), pois o worker NAO tem a acao rotate.
+ *  - para o bloco cair na posicao (QX,QY) exigida, aproximamos o dispenser
+ *    pelo lado certo (ficar na celula dispenser-(QX,QY)) e pedir/anexar
+ *    na direcao (QX,QY).
+ *  - role default nao faz request/attach/submit; por isso e preciso achar
+ *    um role zone e adoptar "worker" antes.
  */
-@reagir_anuncio_tarefa
-+tarefa_atual(Task) : Task \== "nenhuma" & flag_virar_worker <-
+@reagir_tarefa_alvo
++tarefa_alvo(N, QX, QY, T) : flag_virar_worker & not sou_worker <-
     .my_name(Eu);
-    .print("[", Eu, "] time aceitou '", Task, "'. Promovendo-me a worker.");
-    !virar_worker(Task).
+    .print("[WORKER] ", Eu, " assumiu task ", N, " (bloco ", T, " em ", QX, ",", QY, ")");
+    +sou_worker.
 
-+!virar_worker(Task) : flag_virar_worker <-
-    // TODO passo 3:
-    //   adoptRole(worker);          // papel SOCIAL MOISE+ (compatibility)
-    //   !executar(adopt(worker));   // papel de CENARIO MASSim (acoes fisicas)
-    //   depois: ler os blocos exigidos pela Task (crenca task(Task,_,_,Req))
-    //   e ir buscar/anexar cada um via request/attach. Ver QuadroEquipe
-    //   para descobrir dispensers ja mapeados (dispenser_descoberto/3).
-    !montar_estrutura(Task).
-+!virar_worker(_) <- true.
+// mapeia um deslocamento cardinal (QX,QY) para a direcao correspondente
+dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 
+/* ---- FASE A: adotar o papel de cenario "worker" (precisa de role zone) ---- */
+// estou sobre um role zone -> adopt(worker)
++!acao_worker(_, _, _, _, adopt(worker)) : not role(worker) & roleZone(0,0) <- true.
+// conheco um role zone -> navego ate ele
++!acao_worker(_, _, _, _, Acao) : not role(worker) & mem_rolezone(TX,TY) <-
+    !mover_rumo(TX, TY, Acao).
+// nao conheco role zone -> exploro para achar um
++!acao_worker(_, _, _, _, Acao) : not role(worker) <-
+    !explorar(Acao).
 
-/* ===================================================================== */
-/* PASSO 4: MONTAR ESTRUTURA E SUBMETER NA GOAL ZONE                      */
-/* ===================================================================== */
+/* ---- FASE B: sou worker, ainda sem bloco -> buscar/anexar ---- */
+// o dispenser do tipo esta exatamente na direcao requerida (QX,QY) -> request
++!acao_worker(_, QX, QY, T, request(Dir))
+    : role(worker) & not carregando(_) & not pedi_bloco(_)
+      & dir_de_delta(QX, QY, Dir) & thing(QX, QY, dispenser, T)
+    <- +pedi_bloco(Dir).
+// pedi e o bloco apareceu em (QX,QY) -> attach
++!acao_worker(_, QX, QY, T, attach(Dir))
+    : role(worker) & not carregando(_) & pedi_bloco(Dir) & thing(QX, QY, block, _)
+    <- -pedi_bloco(Dir); +carregando(T);
+       .my_name(Eu); .print("[WORKER] ", Eu, " anexou bloco ", T, " em (", QX, ",", QY, ")").
+// pedi mas o bloco ainda nao apareceu -> espera
++!acao_worker(_, _, _, _, skip) : role(worker) & not carregando(_) & pedi_bloco(_) <- true.
+// conheco um dispenser do tipo -> navego para a celula que poe o dispenser em (QX,QY)
++!acao_worker(_, QX, QY, T, Acao)
+    : role(worker) & not carregando(_) & mem_dispenser(DXa, DYa, T)
+    <- TXa = DXa - QX;  TYa = DYa - QY;
+       !mover_rumo(TXa, TYa, Acao).
+// nao conheco dispenser do tipo -> exploro
++!acao_worker(_, _, _, _, Acao) : role(worker) & not carregando(_) <-
+    !explorar(Acao).
 
-/*
- * Depois de coletar os blocos, o worker precisa posiciona-los no pattern
- * pedido pela task (acoes attach/rotate/connect entre workers) e, estando
- * numa goal zone, executar submit(Task).
- */
-+!montar_estrutura(Task) : flag_virar_worker <-
-    // TODO passo 4a: buscar blocos nos dispensers e conecta-los no formato
-    //   exigido (req(DX,DY,Tipo) dentro da crenca task). Coordenacao entre
-    //   workers via QuadroEquipe / link worker<->worker do org.xml.
-    !submeter_tarefa(Task).
-+!montar_estrutura(_) <- true.
+/* ---- FASE C: sou worker, com bloco -> levar a goal zone e submeter ---- */
+// estou numa goal zone -> submit
++!acao_worker(N, _, _, _, submit(N))
+    : role(worker) & carregando(_) & goalZone(0,0) & flag_submeter
+    <- .my_name(Eu); .print("[WORKER] ", Eu, " em goal zone - submetendo ", N).
+// conheco uma goal zone -> navego ate ela
++!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & mem_goalzone(TX,TY) <-
+    !mover_rumo(TX, TY, Acao).
+// nao conheco goal zone -> exploro
++!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) <-
+    !explorar(Acao).
 
-+!submeter_tarefa(Task) : flag_submeter & em_goal_zone <-
-    .my_name(Eu);
-    .print("[", Eu, "] em goal zone - submetendo '", Task, "'.");
-    !executar(submit(Task)).
-// Ainda nao esta na goal zone (ou flag desligada): TODO navegar ate ela.
-+!submeter_tarefa(_) <- true.
-
-/*
- * Verdadeiro quando o agente esta sobre uma celula de goal zone. Como as
- * percepcoes sao relativas, a celula do proprio agente e (0,0).
- * TODO passo 4b: confirmar o nome do percept de goal zone com scenario.md.
- */
-em_goal_zone :- goal(0, 0).
+// fallback geral
++!acao_worker(_, _, _, _, skip) <- true.

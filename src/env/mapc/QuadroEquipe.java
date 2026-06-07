@@ -65,6 +65,7 @@ public class QuadroEquipe extends Artifact {
     private final Set<String> dispensersVistos  = new HashSet<>();
     private final Set<String> goalsVistas        = new HashSet<>();
     private final Set<String> taskboardsVistos   = new HashSet<>();
+    private final Set<String> roleZonesVistas    = new HashSet<>();
 
     /*
      * [INSTRUMENTACAO DE TESTE - passo 1] Ultima posicao relatada por agente,
@@ -129,6 +130,21 @@ public class QuadroEquipe extends Artifact {
     }
 
     /**
+     * [Passo 3] Anuncia a task-ALVO escolhida pelo coordenador, ja decomposta
+     * para o caso de UM bloco: nome + (qx,qy) = posicao relativa exigida do
+     * bloco + tipo. Vira a crenca tarefa_alvo(Nome,QX,QY,Tipo) nos workers.
+     * Idempotente: atualiza se ja existir.
+     */
+    @OPERATION
+    void anunciar_tarefa_alvo(String nome, int qx, int qy, String tipo) {
+        if (hasObsProperty("tarefa_alvo")) {
+            getObsProperty("tarefa_alvo").updateValues(nome, qx, qy, tipo);
+        } else {
+            defineObsProperty("tarefa_alvo", nome, qx, qy, tipo);
+        }
+    }
+
+    /**
      * Permite consultar a tarefa atual. As vezes e mais conveniente
      * buscar via OPERATION do que via crenca, especialmente em planos
      * que rodam fora do contexto onde a observacao chegou.
@@ -179,13 +195,23 @@ public class QuadroEquipe extends Artifact {
         }
     }
 
-    /** Registra um taskboard descoberto (idempotente). */
+    /** Registra um taskboard descoberto (idempotente). [nao usado no 2022] */
     @OPERATION
     void registrar_taskboard(int x, int y) {
         if (taskboardsVistos.add(x + "," + y)) {
             defineObsProperty("taskboard_descoberto", x, y);
             System.out.println("[QUADRO] +taskboard(" + x + "," + y
                 + ")  total=" + taskboardsVistos.size());
+        }
+    }
+
+    /** Registra um role zone descoberto (idempotente). */
+    @OPERATION
+    void registrar_rolezone(int x, int y) {
+        if (roleZonesVistas.add(x + "," + y)) {
+            defineObsProperty("rolezone_descoberta", x, y);
+            System.out.println("[QUADRO] +rolezone(" + x + "," + y
+                + ")  total=" + roleZonesVistas.size());
         }
     }
 

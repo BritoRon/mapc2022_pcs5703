@@ -77,9 +77,9 @@ ultimo_action_id(-1).
  */
 flag_mapear.               // passo 1: registrar mapa em coords absolutas (SEGURO, ligado)
 flag_identificar.          // passo 2: identificar companheiros por posicao-espelho (LIGADO)
-//flag_aceitar_tarefa.     // passo 3: coordenador aceita tarefa no taskboard
-//flag_virar_worker.       // passo 3: explorador adota papel worker e busca blocos
-//flag_submeter.           // passo 4: worker submete a tarefa numa goal zone
+flag_selecionar_tarefa.    // passo 3: coordenador escolhe e anuncia a task-alvo (LIGADO)
+flag_virar_worker.         // passo 3: explorador vira worker e busca/monta o bloco (LIGADO)
+flag_submeter.             // passo 3/4: worker submete a tarefa numa goal zone (LIGADO)
 
 
 /* ===================================================================== */

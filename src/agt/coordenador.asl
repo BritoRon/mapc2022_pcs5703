@@ -89,40 +89,48 @@
 
 
 /* ===================================================================== */
-/* PASSO 3 (lado coordenador): ESCOLHER E ACEITAR TAREFA                  */
+/* PASSO 3 (lado coordenador): ESCOLHER E ANUNCIAR A TASK-ALVO            */
 /* ===================================================================== */
 
 /*
- * Caminho "feliz" (so ativo com flag_aceitar_tarefa): se ainda nao
- * aceitamos nenhuma tarefa e existe uma elegivel num taskboard adjacente,
- * aceita, registra e anuncia ao time pelo QuadroEquipe.
+ * Modelo MAPC 2022: nao ha accept nem taskboard. O coordenador apenas
+ * ESCOLHE uma task ativa e a anuncia (tarefa_alvo) no QuadroEquipe; os
+ * workers cuidam de juntar o bloco e submeter numa goal zone.
+ *
+ * O coordenador e estacionario: sempre executa skip; a decisao (selecionar
+ * a task) e o efeito do seu passo.
  */
-+!ciclo_coordenador
-    : flag_aceitar_tarefa & not tarefa_aceita(_) & escolher_tarefa(Task)
-    <- .print("Coordenador aceitando tarefa '", Task, "'.");
-       !executar(accept(Task));
-       +tarefa_aceita(Task);
-       anunciar_tarefa(Task).
-
-// Fallback (sempre disponivel): nada a aceitar agora -> skip para nao
-// perder o passo. Mantem o baseline enquanto flag_aceitar_tarefa estiver
-// desligada.
 +!ciclo_coordenador <-
-    .findall(task(N,D,R,Req), task(N,D,R,Req), Tarefas);
-    .length(Tarefas, Qtd);
-    if (Qtd > 0) {
-        .print(Qtd, " tarefa(s) disponivel(eis). TODO: escolher uma.");
-    }
+    !selecionar_tarefa;
     !executar(skip).
 
 /*
- * Heuristica de escolha de tarefa. ESQUELETO: pega a primeira task visivel
- * SE houver um taskboard adjacente (a acao accept exige proximidade).
- *
- * TODO passo 3 (item 5 do relatorio): priorizar tasks pequenas (LTI-USP
- *   §3.4), considerar deadline e reward decay (GOAL-DTU 2021), e leiloar
- *   entre workers quem esta mais perto dos blocos (JaCaMo Builders §4.1).
+ * Escolhe (se preciso) a melhor task de UM bloco com requisito em celula
+ * cardinal adjacente (|QX|+|QY|=1, unica viavel sem rotate) e a anuncia.
+ * Criterio: maior reward (.max ordena cand(R,...) pelo 1o arg).
  */
-escolher_tarefa(Task) :-
-    task(Task, _, _, _) &
-    taskboard(TX, TY) & (math.abs(TX) + math.abs(TY)) <= 1.
++!selecionar_tarefa : flag_selecionar_tarefa & precisa_selecionar <-
+    .findall(cand(R, N, QX, QY, T),
+             ( task(N, _, R, [req(QX, QY, T)]) & (math.abs(QX) + math.abs(QY)) == 1 ),
+             L);
+    if (L \== []) {
+        .max(L, cand(_, NB, QXB, QYB, TB));
+        .print("[COORD] task-alvo: ", NB, " | bloco ", TB, " em (", QXB, ",", QYB, ")");
+        anunciar_tarefa_alvo(NB, QXB, QYB, TB);
+    }.
+// nada a (re)selecionar agora, ou nenhuma task viavel: nao faz nada.
++!selecionar_tarefa <- true.
+
+/*
+ * Precisa selecionar quando ainda nao ha alvo, ou quando o alvo atual
+ * expirou (nao consta mais entre as tasks ativas).
+ */
+precisa_selecionar :- not tarefa_alvo(_, _, _, _).
+precisa_selecionar :- tarefa_alvo(N, _, _, _) & not task(N, _, _, _).
+
+// [DEBUG passo 3] loga cada task nova (uma vez) com tamanho e requisitos,
+// para sabermos se aparecem tasks de 1 bloco com requisito cardinal.
++task(N, D, R, Reqs) : not ja_vi_task(N) <-
+    +ja_vi_task(N);
+    .length(Reqs, Tam);
+    .print("[TASKINFO] ", N, " size=", Tam, " reward=", R, " reqs=", Reqs).
