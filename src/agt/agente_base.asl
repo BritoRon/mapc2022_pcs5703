@@ -54,6 +54,14 @@ distancia_visao(5).            // raio de visao do agente (Manhattan), do cenari
 limite_passos_retry(3).        // tentativas antes de desistir de uma acao
 energia_minima_seguranca(20).  // abaixo disso o agente prioriza recarregar
 
+/*
+ * Ultimo actionID ja tratado. A ponte EIS reprocessa cada passo do servidor
+ * ~2x (re-dispara +actionID para o mesmo ID), o que fazia o agente enviar
+ * varias acoes por passo e desperdicar passos (no_action). Os planos
+ * +actionID usam isto para agir UMA unica vez por actionID. Comeca em -1.
+ */
+ultimo_action_id(-1).
+
 
 /* ===================================================================== */
 /* FLAGS DE ATIVACAO INCREMENTAL (proximos passos do README)              */

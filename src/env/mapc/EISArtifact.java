@@ -3,6 +3,7 @@ package mapc;
 import cartago.Artifact;
 import cartago.OPERATION;
 import cartago.INTERNAL_OPERATION;
+import cartago.GUARD;
 
 import eis.EnvironmentInterfaceStandard;
 import eis.PerceptUpdate;
@@ -78,6 +79,15 @@ public class EISArtifact extends Artifact {
     private String entityName;
 
     /**
+     * Sincronizacao percepcao<->acao. O perceiveLoop percebe UM passo, commita
+     * (no await) e espera o agente agir antes de consumir o proximo passo. Isso
+     * impede a thread de percepcao de "correr na frente" e fazer a acao do
+     * agente ser carimbada com um actionID ja adiantado (causa do no_action).
+     * O agente chama acao_concluida() apos enviar sua acao no passo.
+     */
+    private volatile boolean agenteAgiu = false;
+
+    /**
      * Inicializacao do artefato. Recebe como parametro o nome da entidade EIS
      * que este artefato vai controlar - tipicamente igual ao nome do agente
      * Jason que faz focus nele (e.g. "explorador1").
@@ -85,10 +95,9 @@ public class EISArtifact extends Artifact {
     void init(String entityName) {
         this.entityName = entityName;
         ensureEIStarted();
-        // Dispara o 1o ciclo de percepcao. Cada ciclo e UMA operacao interna
-        // que se re-agenda (ver perceiveStep) - assim as observable properties
-        // sao commitadas/propagadas aos agentes a cada passo.
-        execInternalOp("perceiveStep");
+        // Dispara o loop de percepcao (uma unica operacao interna, que usa
+        // await para pacear-se ao agente - ver perceiveLoop).
+        execInternalOp("perceiveLoop");
     }
 
     /**
@@ -141,46 +150,77 @@ public class EISArtifact extends Artifact {
      * sleep/polling explicito.</p>
      */
     /**
-     * UM ciclo de percepcao. Bloqueia em getPercepts ate o proximo step do
-     * servidor (scheduling=true), traduz os percepts em observable properties
-     * e entao SE RE-AGENDA via execInternalOp.
+     * Loop de percepcao paceado ao agente via <code>await</code>.
      *
-     * <p><b>Por que uma operacao por ciclo (e nao um while(true))?</b><br>
-     * No CArtAgO, as alteracoes de observable property feitas durante uma
-     * operacao so sao COMMITADAS e propagadas aos agentes observadores quando
-     * a operacao TERMINA. Um while(true) que nunca retorna jamais commitava as
-     * obs properties - os agentes nunca recebiam +step/+actionID como crenca.
-     * Reagendando a cada passo, cada ciclo termina e propaga suas mudancas.</p>
+     * <p>Cada iteracao: (1) bloqueia ate chegarem os percepts do proximo passo,
+     * (2) traduz em observable properties, (3) <code>await("agenteAgiu")</code> -
+     * que COMMITA as obs properties (o agente passa a ver +step/+actionID) e
+     * SUSPENDE ate o agente chamar <code>acao_concluida()</code>. So entao
+     * consumimos o proximo passo.</p>
+     *
+     * <p><b>Por que await?</b> Sem ele a thread de percepcao corria na frente:
+     * consumia o passo N+1 do EISMASSim antes de o agente agir no passo N, e a
+     * acao acabava carimbada com um actionID adiantado -> o passo N virava
+     * no_action. O await garante 1 passo percebido -> 1 acao do agente -> proximo
+     * passo, sem corrida. (Tambem resolve o problema do while(true) que nunca
+     * commitava: await e um ponto de commit.)</p>
      */
     @INTERNAL_OPERATION
-    void perceiveStep() {
-        try {
+    void perceiveLoop() {
+        while (true) {
+            PerceptUpdate update;
+            try {
+                update = aguardarPerceptsDoProximoPasso();
+            } catch (Exception ex) {
+                System.err.println("[EISArtifact:" + entityName
+                    + "] perceiveLoop encerrado: " + ex.getMessage());
+                return;
+            }
+            if (update == null) return; // encerrando
+
+            // Primeiro removemos as percepcoes que sairam de cena, depois as novas
+            for (Percept p : update.getDeleteList()) removePercept(p);
+            for (Percept p : update.getAddList())   addPercept(p);
+
+            // Commita as obs properties e espera o agente agir neste passo
+            // antes de consumir o proximo (impede a corrida percepcao>acao).
+            agenteAgiu = false;
+            await("agenteAgiu");
+        }
+    }
+
+    /**
+     * Bloqueia chamando getPercepts ate obter um lote NAO-vazio (o proximo
+     * passo do servidor). Em scheduling=true o getPercepts ja bloqueia ate o
+     * timeout; o pequeno sleep evita busy-spin caso ele retorne vazio rapido.
+     */
+    private PerceptUpdate aguardarPerceptsDoProximoPasso() throws Exception {
+        while (true) {
             Collection<String> entities = ei.getAssociatedEntities(entityName);
             Map<String, PerceptUpdate> perMap =
                 ei.getPercepts(entityName, entities.toArray(new String[0]));
-
-            for (String ent : entities) {
-                PerceptUpdate update = perMap.get(ent);
-                if (update == null) continue;
-
-                // Primeiro removemos as percepcoes que sairam de cena
-                for (Percept p : update.getDeleteList()) {
-                    removePercept(p);
-                }
-                // Depois adicionamos as novas
-                for (Percept p : update.getAddList()) {
-                    addPercept(p);
-                }
+            PerceptUpdate update = perMap.get(entityName);
+            if (update != null
+                && (!update.getAddList().isEmpty() || !update.getDeleteList().isEmpty())) {
+                return update;
             }
-        } catch (Exception ex) {
-            // Servidor caiu / encerrando: loga e NAO re-agenda (encerra o loop).
-            System.err.println("[EISArtifact:" + entityName + "] perceiveStep encerrado: "
-                               + ex.getMessage());
-            return;
+            Thread.sleep(5);
         }
-        // Re-agenda o proximo ciclo como uma NOVA operacao interna, garantindo
-        // que as obs properties deste ciclo sejam commitadas antes da proxima.
-        execInternalOp("perceiveStep");
+    }
+
+    /** Guarda do await: verdadeira quando o agente ja agiu neste passo. */
+    @GUARD
+    boolean agenteAgiu() {
+        return agenteAgiu;
+    }
+
+    /**
+     * Chamada pelo agente logo apos enviar sua acao do passo. Libera o
+     * perceiveLoop para consumir o proximo passo.
+     */
+    @OPERATION
+    void acao_concluida() {
+        agenteAgiu = true;
     }
 
     /**
@@ -249,7 +289,13 @@ public class EISArtifact extends Artifact {
             Number n = ((Numeral) p).getValue();
             double d = n.doubleValue();
             if (d == Math.floor(d) && !Double.isInfinite(d)) {
-                return (int) d;
+                // Inteiro: usa int se couber, senao long. Sem isto, valores
+                // grandes (timestamp/deadline em ms) estouravam para MAX_INT.
+                long l = (long) d;
+                if (l >= Integer.MIN_VALUE && l <= Integer.MAX_VALUE) {
+                    return (int) l;
+                }
+                return l;
             }
             return d;
         } else if (p instanceof Identifier) {

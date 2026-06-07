@@ -68,16 +68,22 @@
  * O baseline ainda usa random walk em escolher_acao. As iteracoes
  * seguintes substituem isso por uma estrategia de cobertura inteligente.
  */
-+actionID(ID) <-
++actionID(ID) : ultimo_action_id(Last) & ID \== Last <-
+    -+ultimo_action_id(ID);
     .findall(r(A, R), (lastAction(A) & lastActionResult(R)), LAR);
-    .print("[DBGres] ultima acao/resultado: ", LAR);
+    .findall(t(S, TS, DL), (step(S) & timestamp(TS) & deadline(DL)), TL);
+    .print("[DBGres] ", LAR, " | step/ts/deadline: ", TL);
     !atualizar_posicao;
     !relatar_posicao_teste;
     !registrar_descobertas;
     !identificar_companheiros;
     !logar_visao;
     !escolher_acao(Acao);
-    !executar(Acao).
+    !executar(Acao);
+    acao_concluida.   // libera o perceiveLoop do EIS a consumir o proximo passo
+// actionID repetido (mesmo passo reprocessado pela ponte EIS): ignora,
+// garantindo UMA acao por passo.
++actionID(_) <- true.
 
 
 /*
