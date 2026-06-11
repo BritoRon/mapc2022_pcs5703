@@ -75,6 +75,79 @@ No terminal do servidor, pressione **ENTER** quando os 3 agentes do `mapc2022_pc
 
 A senha de todos é `1` (vem do `SampleConfig.json` do servidor). Para usar o time **B** em vez do **A**, troque `agentA*` por `agentB*` no `eismassimconfig.json`.
 
+## Como o servidor do contest (MASSim 2022) é configurado
+
+Toda a configuração é feita por **arquivos JSON**. Um config de torneio (ex.: `server/conf/SampleConfig.json`) referencia uma **lista de simulações**, cada uma num arquivo em `server/conf/sim/`. O torneio roda esses sims **em sequência**, podendo cada um ter regras diferentes. Cada simulação define:
+
+- **grid** (largura × altura) e os obstáculos/cavernas;
+- **agentes por time** (`entities`) e quantos times competem (`teamsPerMatch`);
+- **dispensers**, **goal zones** e **role zones** (quantidade);
+- **tasks**: tamanho (nº de blocos), quantas simultâneas, reward, deadline;
+- **papéis** (`default`/`worker`/`digger`/…), cada um com suas ações, visão e velocidade;
+- **normas**, **eventos** (clear events) e o número de **passos**.
+
+Os parâmetros **variam entre simulações** — não são fixos. Exemplos dos sims de amostra que acompanham o servidor:
+
+| Sim | Grid | Agentes/time | Dispensers | Goal/Role zones | Tasks | Passos |
+|---|---|---|---|---|---|---|
+| `sim1` | **70×70** | **20** | 5–10 | 4 / 5 | tamanho 1–4, 2 simultâneas | 750 |
+| `sim2` | **100×100** | **40** | 5–10 | 7 / 5 | tamanho 2–4, 3 simultâneas | 750 |
+
+Pontos importantes para a estratégia:
+
+- **Dois times competem** (`teamsPerMatch: 2`), cada um com **20–40 agentes**. Este esqueleto controla apenas **3 agentes** (declarados no `.jcm`/`eismassimconfig.json`) — para escalar, declare mais entidades.
+- **O grid é TOROIDAL**: ao sair por uma borda, o agente reaparece na borda oposta. Isso afeta diretamente o rastreio de posição absoluta por soma de deslocamentos (a coordenada cresce sem limite a cada volta) — uma solução robusta precisa de **coordenadas conscientes do tamanho do grid** (módulo).
+- As percepções são **relativas** (`absolutePosition: false`); o agente não recebe sua posição absoluta nem o tamanho do grid — precisa inferir/mapear.
+
+### Alcance de visão por papel (e como foi determinado)
+
+A visão é um **raio em distância de Manhattan**: um agente percebe toda célula a no máximo `r` passos de si (`scenario.md` §"Vision range"). O valor de `r` é **propriedade do papel**, definido em `server/conf/sim/roles/standard.json`:
+
+| Papel | `vision` na config |
+|---|---|
+| `default` | 5 |
+| `explorer` | 7 |
+| `worker`, `constructor`, `digger` | (ausente) |
+
+Surge a dúvida: se `worker` **não** declara `vision`, ele fica **cego** (visão 0) ao ser adotado? Isso é decisivo para a estratégia, pois um worker cego não conseguiria navegar até dispensers/goal zones por percepção.
+
+**Método de verificação:** inspeção do código-fonte do servidor (`massim_2022/protocol/src/main/java/massim/protocol/data/Role.java`). O parser de papéis lê a visão com
+
+```java
+jsonRole.optInt("vision", baseRole.vision)
+```
+
+ou seja, quando a chave `vision` está ausente, o papel **herda a visão do papel-base** (o `default`, `vision = 5`). Confirmado também por `Entity.getVision()`, que retorna `this.role.vision()`.
+
+**Conclusão:** `worker`/`constructor`/`digger` têm **visão 5** (herdada), não são cegos. Por isso a estratégia de **navegação por percepção relativa** (mover-se rumo a alvos *visíveis*) funciona inclusive na fase de worker — escolha de projeto adotada justamente por ser robusta ao **grid toroidal** (ver decisão de design abaixo).
+
+## Decisões de design e validação (formato de relatório)
+
+> Esta seção registra, em estilo de relatório, decisões técnicas tomadas durante o desenvolvimento e como foram validadas em testes ao vivo contra o servidor MASSim 2022. É material de apoio ao Item 5 (estratégia) e Item 6 (características técnicas) do enunciado.
+
+### D1 — Navegação robusta ao grid toroidal: percepção relativa em vez de coordenadas absolutas
+
+**Contexto.** O grid do cenário é **toroidal** (ao sair por uma borda, o agente reaparece na oposta) — verificado empiricamente: num grid 20×20 a posição rastreada chegou a `x = 300` apenas somando *moves* bem-sucedidos. O esqueleto mantém um mapa em **coordenadas absolutas** obtidas pela soma dos deslocamentos a partir do *spawn* (Passo 1).
+
+**Problema observado.** A navegação gulosa em direção a uma coordenada absoluta gravada **diverge** num toro: a direção "alvo − posição" no referencial ilimitado pode corresponder ao caminho *longo* (dando a volta). O agente então se afasta do alvo; ao se mover, **re-percebe o mesmo alvo numa coordenada ainda mais distante** (o erro acumula), e passa a persegui-lo indefinidamente — comportamento visível como agentes "subindo direto, sumindo numa borda e reaparecendo na oposta". Em mapas grandes com obstáculos o efeito é lento (o agente perambula localmente); em grids pequenos e abertos, explode.
+
+**Decisão.** Para o trecho final de aproximação, **navegar pela percepção relativa a alvos visíveis** (role zone, dispenser, goal zone): se o alvo está dentro do raio de visão, mover-se rumo ao seu *offset relativo* `(rx,ry)` — que é **sempre o caminho curto correto num toro**, independente de qualquer wrap. O mapa absoluto fica como **guia grosseiro** ("chegar perto") e *fallback* quando nada está visível. Implementado nos planos `acao_worker` do `explorador.asl` (regras `*_visivel` + plano `!mover_rel`).
+
+**Limitação conhecida.** Uma solução plenamente correta exigiria **coordenadas conscientes do tamanho do grid** (aritmética modular), mas o servidor não fornece o tamanho do grid em modo `absolutePosition: false`; inferi-lo demandaria detecção de *loop closure*. A navegação por visão contorna o problema no que importa (aproximação final).
+
+### D2 — Cenário de teste controlado (`DemoConfig.json`) para validar o pipeline de tarefa
+
+**Contexto.** Os mapas do `SampleConfig` são grandes (70×70, 100×100) e aleatórios, com tarefas de 1–4 blocos. Completar uma tarefa de fato exige a **conjunção** de muitas condições no mesmo episódio (tarefa de 1 bloco *cardinal* + dispenser do tipo descoberto + role zone e goal zone alcançáveis + passos suficientes). Em testes ao vivo, essa conjunção quase nunca se alinhava por acaso, impedindo a **observação** do caminho `request → attach → submit` mesmo com o código implementado.
+
+**Decisão.** Criar um cenário de demonstração controlado, **aditivo** (não altera os configs originais do servidor), em `massim_2022/server/conf/`:
+
+- `DemoConfig.json` — config de torneio que roda o mesmo sim de demo algumas vezes em sequência (evita reiniciar o servidor a cada teste);
+- `sim/sim_demo.json` — grid **30×30** aberto, **apenas tarefas de 1 bloco** (`size: [1,1]`), ~20 dispensers (todos os 3 tipos), 5 goal zones e 5 role zones, **3 agentes por time**.
+
+Rodar com: `java -jar server/target/server-2022-1.1-jar-with-dependencies.jar -conf server/conf/DemoConfig.json --monitor 8000`.
+
+**Resultados dos testes (parciais).** Neste cenário, validou-se ao vivo a maior parte do pipeline: o coordenador **seleciona e anuncia** uma tarefa de 1 bloco; ambos exploradores **se promovem a worker**; e, com a navegação por visão (D1), os workers **alcançam um role zone e adotam o papel `worker` rapidamente** (≈ passo 12, `adopt: success`) — antes disso, com navegação puramente absoluta, nunca chegavam. As fases finais (`request`/`attach`/`submit`) ainda não foram observadas: após adotar o papel, quando nenhum dispenser do tipo está *visível*, o worker recai na busca por coordenada absoluta e volta a sofrer com o *drift* toroidal (D1). Próximo passo: estender a busca por visão também à fase de coleta (explorar dirigido até avistar um dispenser do tipo, então aproximar por percepção).
+
 ## Como o exercício é atendido (mapeamento para o template do relatório)
 
 | Item do enunciado | Onde está no projeto |

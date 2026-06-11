@@ -114,7 +114,7 @@
     // bloco JA tem dispenser descoberto (senao a task e incompletavel agora).
     .findall(cand(R, N, QX, QY, T),
              ( task(N, _, R, [req(QX, QY, T)]) & (math.abs(QX) + math.abs(QY)) == 1
-               & dispenser_descoberto(_, _, T) ),
+               & tem_dispenser(T) ),
              L);
     if (L \== []) {
         .max(L, cand(_, NB, QXB, QYB, TB));
@@ -130,6 +130,14 @@
  */
 precisa_selecionar :- not tarefa_alvo(_, _, _, _).
 precisa_selecionar :- tarefa_alvo(N, _, _, _) & not task(N, _, _, _).
+
+/*
+ * Existe dispenser do tipo T no mapa compartilhado? Robusto ao tipo do bloco
+ * vir como ATOMO (b2, na task) ou STRING ("b2", em dispenser_descoberto, que
+ * passou pela operacao Java registrar_dispenser(String)).
+ */
+tem_dispenser(T) :- dispenser_descoberto(_, _, T).
+tem_dispenser(T) :- .term2string(T, TS) & dispenser_descoberto(_, _, TS).
 
 // [DEBUG passo 3] loga cada task nova (uma vez) com tamanho e requisitos,
 // para sabermos se aparecem tasks de 1 bloco com requisito cardinal.

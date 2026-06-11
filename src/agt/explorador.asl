@@ -216,8 +216,29 @@ energia_ok :- energy(E) & energia_minima_seguranca(Min) & E >= Min.
  *   ponto_proprio = ponto_ref - offset_ref
  */
 disp_conhecido(T, X, Y) :- mem_dispenser(X, Y, T).
-disp_conhecido(T, X, Y) :- dispenser_descoberto(RX, RY, T) & offset_ref(RDX, RDY)
-                           & X = RX - RDX & Y = RY - RDY.
+disp_conhecido(T, X, Y) :- dispenser_descoberto(RX, RY, DT) & mesmo_tipo(T, DT)
+                           & offset_ref(RDX, RDY) & X = RX - RDX & Y = RY - RDY.
+// tipos iguais, robusto a ATOMO (task) vs STRING (mapa compartilhado via Java)
+mesmo_tipo(T, T).
+mesmo_tipo(T, DT) :- .term2string(T, DT).
+
+/*
+ * ALVOS VISIVEIS (na visao atual, em coords RELATIVAS). Navegar por estes e
+ * robusto ao grid TOROIDAL - a percepcao relativa e sempre o caminho curto
+ * real, ao contrario das coordenadas absolutas gravadas (que divergem no toro).
+ * (0,0) e a propria celula, entao excluimos.
+ */
+rolezone_visivel(RX, RY)    :- roleZone(RX, RY) & (RX \== 0 | RY \== 0).
+goalzone_visivel(GX, GY)    :- goalZone(GX, GY) & (GX \== 0 | GY \== 0).
+dispenser_visivel(T, DX, DY) :- thing(DX, DY, dispenser, T).
+
+/*
+ * Move UM passo rumo a um alvo dado em coordenada RELATIVA (RX,RY) a partir de
+ * mim (que sou (0,0)). Reusa o dir_gulosa: o "delta ate o alvo" e o proprio
+ * (RX,RY). Sem saida livre -> explora.
+ */
++!mover_rel(RX, RY, move(Dir)) : direcao_livre(_) <- !dir_gulosa(RX, RY, Dir).
++!mover_rel(_, _, Acao) <- !explorar(Acao).
 
 goalzone_conhecida(X, Y) :- mem_goalzone(X, Y).
 goalzone_conhecida(X, Y) :- goal_descoberta(RX, RY) & offset_ref(RDX, RDY)
@@ -234,6 +255,24 @@ rolezone_conhecida(X, Y) :- rolezone_descoberta(RX, RY) & offset_ref(RDX, RDY)
 volta_atras(D) :- delta(D, DX, DY) & posicao(X, Y) & pos_anterior(PX, PY)
                   & PX == X + DX & PY == Y + DY.
 livre_ok(D)    :- direcao_livre(D) & not volta_atras(D).
+
+/*
+ * ALVO MAIS PROXIMO (Manhattan) de cada tipo, no frame proprio. Reduz passos
+ * desperdiçados em relacao a pegar um alvo arbitrario. So sao chamados quando
+ * o respectivo *_conhecida/_conhecido ja vale (a lista nunca e vazia).
+ */
++!alvo_rolezone_proximo(X, Y) : posicao(PX, PY) <-
+    .findall(d(D, RX, RY),
+             (rolezone_conhecida(RX, RY) & D = math.abs(RX-PX) + math.abs(RY-PY)), L);
+    .min(L, d(_, X, Y)).
++!alvo_disp_proximo(T, X, Y) : posicao(PX, PY) <-
+    .findall(d(D, DX, DY),
+             (disp_conhecido(T, DX, DY) & D = math.abs(DX-PX) + math.abs(DY-PY)), L);
+    .min(L, d(_, X, Y)).
++!alvo_goalzone_proximo(X, Y) : posicao(PX, PY) <-
+    .findall(d(D, GX, GY),
+             (goalzone_conhecida(GX, GY) & D = math.abs(GX-PX) + math.abs(GY-PY)), L);
+    .min(L, d(_, X, Y)).
 
 /*
  * ESCOLHA DE ACAO (prioridade):
@@ -254,11 +293,14 @@ livre_ok(D)    :- direcao_livre(D) & not volta_atras(D).
  * mais terreno e favorece encontros). Ao bater/oscilar, sorteia novo rumo,
  * preferindo direcoes que NAO voltam a celula anterior. Encurralado: cava.
  */
-+!explorar(move(Dir)) : rumo(Dir) & livre_ok(Dir) <- true.
-+!explorar(move(Dir)) : livre_ok(_) <-
-    !dir_livre_ok_aleatoria(Dir);  -+rumo(Dir).
-+!explorar(move(Dir)) : direcao_livre(_) <-      // so volta atras se nao ha outra
-    !dir_livre_aleatoria(Dir);     -+rumo(Dir).
+// Random walk COM MOMENTO: segue o rumo em ~75% dos passos (se a frente
+// estiver livre) e em ~25% re-sorteia entre TODAS as direcoes livres,
+// INCLUSIVE a reversa. Permitir reverter mantem o deslocamento liquido
+// limitado (sem vies direcional) e evita o drift no grid toroidal.
+// (O anti-oscilacao livre_ok fica so na navegacao a alvo, onde importa.)
++!explorar(move(Dir)) : rumo(Dir) & direcao_livre(Dir) & .random(R) & R > 0.25 <- true.
++!explorar(move(Dir)) : direcao_livre(_) <-
+    !dir_livre_aleatoria(Dir);  -+rumo(Dir).
 +!explorar(clear(DX,DY)) : obstaculo_adjacente(DX,DY) & energia_ok <-
     .my_name(Eu);
     .print("[", Eu, "] ENCURRALADO; cavando obstaculo em (", DX, ",", DY, ")").
@@ -330,8 +372,12 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 /* ---- FASE A: adotar o papel de cenario "worker" (precisa de role zone) ---- */
 // estou sobre um role zone -> adopt(worker)
 +!acao_worker(_, _, _, _, adopt(worker)) : not role(worker) & roleZone(0,0) <- true.
-// conheco um role zone (proprio ou do mapa compartilhado) -> navego ate ele
-+!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_conhecida(TX,TY) <-
+// VEJO um role zone -> navego por VISAO (relativo, robusto ao toro)
++!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_visivel(RX, RY) <-
+    !mover_rel(RX, RY, Acao).
+// nao vejo, mas conheco um role zone no mapa -> navego ate o MAIS PROXIMO (absoluto)
++!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_conhecida(_,_) <-
+    !alvo_rolezone_proximo(TX, TY);
     !mover_rumo(TX, TY, Acao).
 // nao conheco role zone -> exploro para achar um
 +!acao_worker(_, _, _, _, Acao) : not role(worker) <-
@@ -350,11 +396,18 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
        .my_name(Eu); .print("[WORKER] ", Eu, " anexou bloco ", T, " em (", QX, ",", QY, ")").
 // pedi mas o bloco ainda nao apareceu -> espera
 +!acao_worker(_, _, _, _, skip) : role(worker) & not carregando(_) & pedi_bloco(_) <- true.
-// conheco um dispenser do tipo (proprio ou compartilhado) -> navego para a
-// celula que poe o dispenser em (QX,QY)
+// VEJO um dispenser do tipo -> me posiciono (por VISAO) na celula que poe o
+// dispenser em (QX,QY): se ele esta em (DX,DY) relativo, ando rumo a (DX-QX,DY-QY).
 +!acao_worker(_, QX, QY, T, Acao)
-    : role(worker) & not carregando(_) & disp_conhecido(T, DXa, DYa)
-    <- TXa = DXa - QX;  TYa = DYa - QY;
+    : role(worker) & not carregando(_) & not pedi_bloco(_) & dispenser_visivel(T, DX, DY)
+    <- RX = DX - QX;  RY = DY - QY;
+       !mover_rel(RX, RY, Acao).
+// nao vejo, mas conheco um dispenser do tipo (proprio ou compartilhado) -> navego
+// ao MAIS PROXIMO (absoluto), para a celula que poe o dispenser em (QX,QY)
++!acao_worker(_, QX, QY, T, Acao)
+    : role(worker) & not carregando(_) & disp_conhecido(T, _, _)
+    <- !alvo_disp_proximo(T, DXa, DYa);
+       TXa = DXa - QX;  TYa = DYa - QY;
        !mover_rumo(TXa, TYa, Acao).
 // nao conheco dispenser do tipo -> exploro
 +!acao_worker(_, _, _, _, Acao) : role(worker) & not carregando(_) <-
@@ -365,8 +418,12 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 +!acao_worker(N, _, _, _, submit(N))
     : role(worker) & carregando(_) & goalZone(0,0) & flag_submeter
     <- .my_name(Eu); .print("[WORKER] ", Eu, " em goal zone - submetendo ", N).
-// conheco uma goal zone (propria ou compartilhada) -> navego ate ela
-+!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_conhecida(TX,TY) <-
+// VEJO uma goal zone -> navego por VISAO (relativo, robusto ao toro)
++!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_visivel(GX, GY) <-
+    !mover_rel(GX, GY, Acao).
+// nao vejo, mas conheco uma goal zone -> navego ate a MAIS PROXIMA (absoluto)
++!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_conhecida(_,_) <-
+    !alvo_goalzone_proximo(TX, TY);
     !mover_rumo(TX, TY, Acao).
 // nao conheco goal zone -> exploro
 +!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) <-
