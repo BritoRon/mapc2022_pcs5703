@@ -375,11 +375,8 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 // VEJO um role zone -> navego por VISAO (relativo, robusto ao toro)
 +!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_visivel(RX, RY) <-
     !mover_rel(RX, RY, Acao).
-// nao vejo, mas conheco um role zone no mapa -> navego ate o MAIS PROXIMO (absoluto)
-+!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_conhecida(_,_) <-
-    !alvo_rolezone_proximo(TX, TY);
-    !mover_rumo(TX, TY, Acao).
-// nao conheco role zone -> exploro para achar um
+// nao vejo um role zone -> exploro ate um entrar na visao
+// (NAO usamos nav por coord absoluta: ela diverge no grid toroidal)
 +!acao_worker(_, _, _, _, Acao) : not role(worker) <-
     !explorar(Acao).
 
@@ -402,14 +399,7 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
     : role(worker) & not carregando(_) & not pedi_bloco(_) & dispenser_visivel(T, DX, DY)
     <- RX = DX - QX;  RY = DY - QY;
        !mover_rel(RX, RY, Acao).
-// nao vejo, mas conheco um dispenser do tipo (proprio ou compartilhado) -> navego
-// ao MAIS PROXIMO (absoluto), para a celula que poe o dispenser em (QX,QY)
-+!acao_worker(_, QX, QY, T, Acao)
-    : role(worker) & not carregando(_) & disp_conhecido(T, _, _)
-    <- !alvo_disp_proximo(T, DXa, DYa);
-       TXa = DXa - QX;  TYa = DYa - QY;
-       !mover_rumo(TXa, TYa, Acao).
-// nao conheco dispenser do tipo -> exploro
+// nao vejo um dispenser do tipo -> exploro ate um entrar na visao
 +!acao_worker(_, _, _, _, Acao) : role(worker) & not carregando(_) <-
     !explorar(Acao).
 
@@ -421,11 +411,7 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 // VEJO uma goal zone -> navego por VISAO (relativo, robusto ao toro)
 +!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_visivel(GX, GY) <-
     !mover_rel(GX, GY, Acao).
-// nao vejo, mas conheco uma goal zone -> navego ate a MAIS PROXIMA (absoluto)
-+!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_conhecida(_,_) <-
-    !alvo_goalzone_proximo(TX, TY);
-    !mover_rumo(TX, TY, Acao).
-// nao conheco goal zone -> exploro
+// nao vejo uma goal zone -> exploro ate uma entrar na visao
 +!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) <-
     !explorar(Acao).
 
