@@ -82,7 +82,8 @@
     !logar_visao;
     !escolher_acao(Acao);
     !executar(Acao);
-    acao_concluida.   // libera o perceiveLoop do EIS a consumir o proximo passo
+    acao_concluida.   
+// libera o perceiveLoop do EIS a consumir o proximo passo
 // actionID repetido (mesmo passo reprocessado pela ponte EIS): ignora,
 // garantindo UMA acao por passo.
 +actionID(_) <- true.
@@ -289,18 +290,40 @@ livre_ok(D)    :- direcao_livre(D) & not volta_atras(D).
 /* EXPLORACAO DIRIGIDA (cobertura/rendezvous, com anti-oscilacao)        */
 /* --------------------------------------------------------------------- */
 /*
- * Mantem um RUMO e segue nele enquanto livre e sem voltar atras (cobre
- * mais terreno e favorece encontros). Ao bater/oscilar, sorteia novo rumo,
- * preferindo direcoes que NAO voltam a celula anterior. Encurralado: cava.
+ * EXPLORACAO POR COBERTURA (varredura serpentina / "lawnmower").
+ *
+ * Cada explorador segue uma direcao PRIMARIA por cob_leg passos, da UM passo
+ * PERPENDICULAR, reverte a primaria e repete - varrendo faixas de forma
+ * sistematica (cobre muito mais que random walk, entao os workers topam com
+ * dispensers/zonas com confiabilidade). Robusto ao grid TOROIDAL: conta passos
+ * RELATIVOS, nao usa coordenadas absolutas. Os dois exploradores comecam com
+ * orientacoes diferentes para cobrir mais. Obstaculos: vira/desvia.
  */
-// Random walk COM MOMENTO: segue o rumo em ~75% dos passos (se a frente
-// estiver livre) e em ~25% re-sorteia entre TODAS as direcoes livres,
-// INCLUSIVE a reversa. Permitir reverter mantem o deslocamento liquido
-// limitado (sem vies direcional) e evita o drift no grid toroidal.
-// (O anti-oscilacao livre_ok fica so na navegacao a alvo, onde importa.)
-+!explorar(move(Dir)) : rumo(Dir) & direcao_livre(Dir) & .random(R) & R > 0.25 <- true.
+cob_leg(20).   // perna longa: varre faixas largas (melhor cobertura)   // comprimento da perna da serpentina
+
+// Init preguicoso do estado de cobertura (na 1a vez que explora).
++!explorar(Acao) : not cob_dir(_) <-
+    .my_name(Eu);  !init_cobertura(Eu);  !explorar(Acao).
++!init_cobertura(explorador1) <- +cob_dir(e); +cob_perp(s); ?cob_leg(N); +cob_passos(N).
++!init_cobertura(explorador2) <- +cob_dir(s); +cob_perp(e); ?cob_leg(N); +cob_passos(N).
++!init_cobertura(_)           <- +cob_dir(n); +cob_perp(e); ?cob_leg(N); +cob_passos(N).
+
+// Segue a direcao primaria enquanto livre e ainda ha passos na perna.
++!explorar(move(D)) : cob_dir(D) & cob_passos(N) & N > 0 & direcao_livre(D) <-
+    -+cob_passos(N-1).
+// Fim da perna (N=0) OU primaria bloqueada -> passo PERPENDICULAR (se livre),
+// reverte a primaria e reinicia a contagem da perna.
++!explorar(move(P)) : cob_perp(P) & direcao_livre(P) & cob_dir(D)
+                      & (cob_passos(0) | not direcao_livre(D)) <-
+    !reverter_dir(D);  ?cob_leg(N);  -+cob_passos(N).
+// Primaria e perpendicular bloqueadas -> desvia por qualquer direcao livre.
 +!explorar(move(Dir)) : direcao_livre(_) <-
-    !dir_livre_aleatoria(Dir);  -+rumo(Dir).
+    !dir_livre_aleatoria(Dir).
+
++!reverter_dir(e) <- -+cob_dir(w).
++!reverter_dir(w) <- -+cob_dir(e).
++!reverter_dir(s) <- -+cob_dir(n).
++!reverter_dir(n) <- -+cob_dir(s).
 +!explorar(clear(DX,DY)) : obstaculo_adjacente(DX,DY) & energia_ok <-
     .my_name(Eu);
     .print("[", Eu, "] ENCURRALADO; cavando obstaculo em (", DX, ",", DY, ")").

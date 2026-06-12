@@ -146,7 +146,15 @@ ou seja, quando a chave `vision` está ausente, o papel **herda a visão do pape
 
 Rodar com: `java -jar server/target/server-2022-1.1-jar-with-dependencies.jar -conf server/conf/DemoConfig.json --monitor 8000`.
 
-**Resultados dos testes (parciais).** Neste cenário, validou-se ao vivo a maior parte do pipeline: o coordenador **seleciona e anuncia** uma tarefa de 1 bloco; ambos exploradores **se promovem a worker**; e, com a navegação por visão (D1), os workers **alcançam um role zone e adotam o papel `worker` rapidamente** (≈ passo 12, `adopt: success`) — antes disso, com navegação puramente absoluta, nunca chegavam. As fases finais (`request`/`attach`/`submit`) ainda não foram observadas: após adotar o papel, quando nenhum dispenser do tipo está *visível*, o worker recai na busca por coordenada absoluta e volta a sofrer com o *drift* toroidal (D1). Próximo passo: estender a busca por visão também à fase de coleta (explorar dirigido até avistar um dispenser do tipo, então aproximar por percepção).
+**Resultados dos testes (parciais).** Neste cenário validou-se ao vivo a maior parte do pipeline: o coordenador **seleciona e anuncia** uma tarefa de 1 bloco; ambos exploradores **se promovem a worker**; e os workers **alcançam um role zone e adotam o papel `worker`** (≈ passo 12, `adopt: success`). A navegação foi tornada **exclusivamente por visão + exploração** (a navegação por coordenada absoluta foi removida do worker, pois divergia no toro — ver D1/D3): com isso o *runaway* de posição desapareceu (a posição fica contida, ex. `x[0,22] y[0,24]`) e a adoção do papel passou a ser confiável. As fases finais (`request → attach → submit`) ainda **não foram observadas**: após adotar o papel, o worker precisa **avistar e posicionar-se** num dispenser do tipo exigido (bloco a `(0,1)`), e isso depende de a exploração levá-lo até lá com o bloco no campo de visão — o que nem sempre ocorreu dentro de um episódio. Próximo passo focado: instrumentar e robustecer a fase de coleta (posicionamento por visão no dispenser).
+
+### D3 — Exploração por cobertura (varredura serpentina) em vez de *random walk*
+
+**Contexto.** A descoberta de recursos (role zones, dispensers, goal zones) dependia de *random walk*, deixando o sucesso ao acaso — agravado pelo *drift* toroidal quando havia viés direcional. Times fortes do MAPC usam **exploração sistemática** (cobertura), não sorte.
+
+**Decisão.** Substituir o *random walk* por uma **varredura serpentina (*lawnmower*)** em `explorador.asl`: cada explorador segue uma direção primária por `cob_leg` passos, dá um passo perpendicular, reverte e repete, varrendo faixas. É **robusto ao toro** (conta passos *relativos*, sem coordenadas absolutas) e os dois exploradores partem de orientações diferentes para cobrir mais. **Efeito medido:** a área coberta cresceu (faixa larga em vez de coluna fina) e a adoção do papel `worker` passou a ocorrer cedo e de forma consistente.
+
+**Limitação conhecida.** O comprimento da perna (`cob_leg`) idealmente acompanha a largura do grid; como o tamanho do grid não é perceptível, ele é um parâmetro ajustável (heurístico). Para o cenário de demo 30×30, `cob_leg = 20` deu boa cobertura.
 
 ## Como o exercício é atendido (mapeamento para o template do relatório)
 
