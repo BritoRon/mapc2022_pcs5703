@@ -80,6 +80,8 @@
     !identificar_companheiros;
     !anunciar_offset_ref;
     !logar_visao;
+    !reset_pos_submit;
+    !diag_worker;
     !escolher_acao(Acao);
     !executar(Acao);
     acao_concluida.   
@@ -223,6 +225,12 @@ disp_conhecido(T, X, Y) :- dispenser_descoberto(RX, RY, DT) & mesmo_tipo(T, DT)
 mesmo_tipo(T, T).
 mesmo_tipo(T, DT) :- .term2string(T, DT).
 
+// igualdade de tipo SIMETRICA: converte AMBOS os lados a string e compara.
+// Necessaria porque o tipo da tarefa_alvo chega como STRING "b1" (veio do
+// coordenador via CArtAgO), mas o tipo no percept thing(...) e o ATOMO b1.
+// Sem isso, a unificacao crua "b1" \= b1 e a visao nunca casa o dispenser.
+tipo_igual(A, B) :- .term2string(A, S) & .term2string(B, S).
+
 /*
  * ALVOS VISIVEIS (na visao atual, em coords RELATIVAS). Navegar por estes e
  * robusto ao grid TOROIDAL - a percepcao relativa e sempre o caminho curto
@@ -231,7 +239,7 @@ mesmo_tipo(T, DT) :- .term2string(T, DT).
  */
 rolezone_visivel(RX, RY)    :- roleZone(RX, RY) & (RX \== 0 | RY \== 0).
 goalzone_visivel(GX, GY)    :- goalZone(GX, GY) & (GX \== 0 | GY \== 0).
-dispenser_visivel(T, DX, DY) :- thing(DX, DY, dispenser, T).
+dispenser_visivel(T, DX, DY) :- thing(DX, DY, dispenser, DT) & tipo_igual(T, DT).
 
 /*
  * Move UM passo rumo a um alvo dado em coordenada RELATIVA (RX,RY) a partir de
@@ -281,7 +289,7 @@ livre_ok(D)    :- direcao_livre(D) & not volta_atras(D).
  *   2) Caso contrario -> exploracao dirigida (que tambem cava obstaculos
  *      se estiver encurralado).
  */
-+!escolher_acao(Acao) : sou_worker & tarefa_alvo(N,QX,QY,T) <-
++!escolher_acao(Acao) : sou_worker & tarefa_alvo(N,QX,QY,_) & tipo_alvo(T) <-
     !acao_worker(N, QX, QY, T, Acao).
 +!escolher_acao(Acao) <-
     !explorar(Acao).
@@ -386,11 +394,59 @@ cob_leg(20).   // perna longa: varre faixas largas (melhor cobertura)   // compr
 @reagir_tarefa_alvo
 +tarefa_alvo(N, QX, QY, T) : flag_virar_worker & not sou_worker <-
     .my_name(Eu);
-    .print("[WORKER] ", Eu, " assumiu task ", N, " (bloco ", T, " em ", QX, ",", QY, ")");
+    // T chega como STRING "b1" (veio do coordenador via CArtAgO). Convertemos
+    // ao ATOMO b1 (parse via .term2string com 1o arg livre) e guardamos em
+    // tipo_alvo, para casar por unificacao pura com thing(...,dispenser,b1).
+    .term2string(Tatom, T);  -+tipo_alvo(Tatom);
+    .print("[WORKER] ", Eu, " assumiu task ", N, " (bloco ", Tatom, " em ", QX, ",", QY, ")");
     +sou_worker.
 
 // mapeia um deslocamento cardinal (QX,QY) para a direcao correspondente
 dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
+
+// quantos passos esperar o bloco aparecer apos um request antes de desistir
+// (evita deadlock se o request falhar no servidor e o bloco nunca vier)
+max_espera_bloco(5).
+
+/* ---- INSTRUMENTACAO DA COLETA (so imprime quando ja sou worker) ----
+ * Mostra, a cada passo, o estado da maquina de coleta para diagnosticar
+ * ONDE a fase B/C trava: papel adotado, task-alvo, dispensers do tipo
+ * VISIVEIS (e onde), zonas visiveis, pedido pendente, espera e carga.   */
++!diag_worker : sou_worker & tarefa_alvo(N, QX, QY, _) & tipo_alvo(T) <-
+    .my_name(Eu);
+    .findall(d(DX,DY), dispenser_visivel(T, DX, DY), DispV);
+    .findall(k(KX,KY), disp_conhecido(T, KX, KY),    DispK);
+    .findall(x, rolezone_visivel(_,_),   RZv);  .length(RZv, NRZv);
+    .findall(x, goalzone_visivel(_,_),   GZv);  .length(GZv, NGZv);
+    .findall(x, rolezone_conhecida(_,_), RZk);  .length(RZk, NRZk);
+    .findall(x, goalzone_conhecida(_,_), GZk);  .length(GZk, NGZk);
+    .findall(p(P),   role(P),        Papeis);
+    .findall(pb(PD), pedi_bloco(PD),  PB);
+    .findall(ew(K),  espera_bloco(K), Esp);
+    .findall(cg(CT), carregando(CT),  Carga);
+    .print("[DIAGW] ", Eu, " papeis=", Papeis, " task=", N,
+           " req=(", QX, ",", QY, ") T=", T,
+           " | disp_vis=", DispV, " disp_conh=", DispK,
+           " | rz_vis=", NRZv, " rz_conh=", NRZk, " gz_vis=", NGZv, " gz_conh=", NGZk,
+           " | pedi=", PB, " espera=", Esp, " carrega=", Carga).
++!diag_worker <- true.
+
+/* ---- RESET POS-SUBMIT ----------------------------------------------------
+ * Apos um submit BEM-SUCEDIDO (lastActionResult success no passo anterior), a
+ * tarefa esta concluida: liberamos o estado de coleta (carregando/pedido) e o
+ * papel social de worker (sou_worker/tipo_alvo), para o agente voltar a explorar
+ * e poder assumir uma NOVA tarefa quando o coordenador anunciar outra. Sem isto,
+ * o worker fica preso reenviando submit na mesma goal zone.                    */
++!reset_pos_submit
+    : sou_worker & carregando(_) & lastAction(submit) & lastActionResult(success) <-
+    .my_name(Eu);
+    .print("[WORKER] ", Eu, " task concluida (submit ok) - liberando estado p/ nova tarefa");
+    .abolish(carregando(_));
+    .abolish(pedi_bloco(_));
+    .abolish(espera_bloco(_));
+    .abolish(tipo_alvo(_));
+    -sou_worker.
++!reset_pos_submit <- true.
 
 /* ---- FASE A: adotar o papel de cenario "worker" (precisa de role zone) ---- */
 // estou sobre um role zone -> adopt(worker)
@@ -398,8 +454,11 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 // VEJO um role zone -> navego por VISAO (relativo, robusto ao toro)
 +!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_visivel(RX, RY) <-
     !mover_rel(RX, RY, Acao).
-// nao vejo um role zone -> exploro ate um entrar na visao
-// (NAO usamos nav por coord absoluta: ela diverge no grid toroidal)
+// nao vejo, mas CONHECO um role zone (mapa) -> rumo ao mais proximo ate avista-lo;
+// ao entrar na visao (raio 5), o plano acima (por VISAO) assume a aproximacao final.
++!acao_worker(_, _, _, _, Acao) : not role(worker) & rolezone_conhecida(_, _) <-
+    !alvo_rolezone_proximo(TX, TY);  !mover_rumo(TX, TY, Acao).
+// nem vejo nem conheco um role zone -> exploro ate um entrar na visao
 +!acao_worker(_, _, _, _, Acao) : not role(worker) <-
     !explorar(Acao).
 
@@ -407,22 +466,39 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 // o dispenser do tipo esta exatamente na direcao requerida (QX,QY) -> request
 +!acao_worker(_, QX, QY, T, request(Dir))
     : role(worker) & not carregando(_) & not pedi_bloco(_)
-      & dir_de_delta(QX, QY, Dir) & thing(QX, QY, dispenser, T)
-    <- +pedi_bloco(Dir).
+      & dir_de_delta(QX, QY, Dir) & thing(QX, QY, dispenser, DT) & tipo_igual(T, DT)
+    <- +pedi_bloco(Dir);  +espera_bloco(0).
 // pedi e o bloco apareceu em (QX,QY) -> attach
 +!acao_worker(_, QX, QY, T, attach(Dir))
     : role(worker) & not carregando(_) & pedi_bloco(Dir) & thing(QX, QY, block, _)
-    <- -pedi_bloco(Dir); +carregando(T);
+    <- -pedi_bloco(Dir); .abolish(espera_bloco(_)); +carregando(T);
        .my_name(Eu); .print("[WORKER] ", Eu, " anexou bloco ", T, " em (", QX, ",", QY, ")").
-// pedi mas o bloco ainda nao apareceu -> espera
-+!acao_worker(_, _, _, _, skip) : role(worker) & not carregando(_) & pedi_bloco(_) <- true.
+// pedi mas o bloco ainda nao apareceu, dentro do limite -> conta e espera
++!acao_worker(_, _, _, _, skip)
+    : role(worker) & not carregando(_) & pedi_bloco(_)
+      & espera_bloco(K) & max_espera_bloco(Max) & K < Max
+    <- Kp = K + 1;  -+espera_bloco(Kp).
+// estourou o limite de espera -> desiste do pedido e volta a buscar
+// (destrava o deadlock: request pode ter falhado no servidor)
++!acao_worker(N, QX, QY, T, Acao)
+    : role(worker) & not carregando(_) & pedi_bloco(_)
+      & espera_bloco(K) & max_espera_bloco(Max) & K >= Max
+    <- .my_name(Eu);
+       .print("[WORKER] ", Eu, " timeout esperando bloco (", K, " passos) - desiste do pedido e retoma busca");
+       .abolish(pedi_bloco(_));  .abolish(espera_bloco(_));
+       !acao_worker(N, QX, QY, T, Acao).
 // VEJO um dispenser do tipo -> me posiciono (por VISAO) na celula que poe o
 // dispenser em (QX,QY): se ele esta em (DX,DY) relativo, ando rumo a (DX-QX,DY-QY).
 +!acao_worker(_, QX, QY, T, Acao)
     : role(worker) & not carregando(_) & not pedi_bloco(_) & dispenser_visivel(T, DX, DY)
     <- RX = DX - QX;  RY = DY - QY;
        !mover_rel(RX, RY, Acao).
-// nao vejo um dispenser do tipo -> exploro ate um entrar na visao
+// nao vejo, mas CONHECO um dispenser do tipo (mapa) -> rumo ao mais proximo ate
+// avista-lo; ao entrar na visao, o plano por VISAO acima faz o posicionamento fino.
++!acao_worker(_, _, _, T, Acao)
+    : role(worker) & not carregando(_) & not pedi_bloco(_) & disp_conhecido(T, _, _)
+    <- !alvo_disp_proximo(T, TX, TY);  !mover_rumo(TX, TY, Acao).
+// nem vejo nem conheco um dispenser do tipo -> exploro ate um entrar na visao
 +!acao_worker(_, _, _, _, Acao) : role(worker) & not carregando(_) <-
     !explorar(Acao).
 
@@ -434,7 +510,10 @@ dir_de_delta(QX, QY, Dir) :- delta(Dir, QX, QY).
 // VEJO uma goal zone -> navego por VISAO (relativo, robusto ao toro)
 +!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_visivel(GX, GY) <-
     !mover_rel(GX, GY, Acao).
-// nao vejo uma goal zone -> exploro ate uma entrar na visao
+// nao vejo, mas CONHECO uma goal zone (mapa) -> rumo a mais proxima ate avista-la
++!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) & goalzone_conhecida(_, _) <-
+    !alvo_goalzone_proximo(TX, TY);  !mover_rumo(TX, TY, Acao).
+// nem vejo nem conheco uma goal zone -> exploro ate uma entrar na visao
 +!acao_worker(_, _, _, _, Acao) : role(worker) & carregando(_) <-
     !explorar(Acao).
 

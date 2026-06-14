@@ -146,7 +146,19 @@ ou seja, quando a chave `vision` está ausente, o papel **herda a visão do pape
 
 Rodar com: `java -jar server/target/server-2022-1.1-jar-with-dependencies.jar -conf server/conf/DemoConfig.json --monitor 8000`.
 
-**Resultados dos testes (parciais).** Neste cenário validou-se ao vivo a maior parte do pipeline: o coordenador **seleciona e anuncia** uma tarefa de 1 bloco; ambos exploradores **se promovem a worker**; e os workers **alcançam um role zone e adotam o papel `worker`** (≈ passo 12, `adopt: success`). A navegação foi tornada **exclusivamente por visão + exploração** (a navegação por coordenada absoluta foi removida do worker, pois divergia no toro — ver D1/D3): com isso o *runaway* de posição desapareceu (a posição fica contida, ex. `x[0,22] y[0,24]`) e a adoção do papel passou a ser confiável. As fases finais (`request → attach → submit`) ainda **não foram observadas**: após adotar o papel, o worker precisa **avistar e posicionar-se** num dispenser do tipo exigido (bloco a `(0,1)`), e isso depende de a exploração levá-lo até lá com o bloco no campo de visão — o que nem sempre ocorreu dentro de um episódio. Próximo passo focado: instrumentar e robustecer a fase de coleta (posicionamento por visão no dispenser).
+**Resultados dos testes — pipeline completo validado ao vivo.** Neste cenário o ciclo de tarefa **fechou ponta a ponta** pela primeira vez. Linha do tempo de um episódio (explorador2):
+
+| Passo | Evento | Resultado |
+|------:|--------|-----------|
+| — | coordenador seleciona e anuncia `task3` (bloco `b1` em `(0,1)`); explorador se promove a worker | — |
+| 20 | alcança um role zone e `adopt(worker)` | `success` |
+| 25 | posiciona-se por visão no dispenser e `request` | `success` |
+| 25 | bloco aparece em `(0,1)` e `attach` | anexado |
+| 35 | navega por visão até a goal zone e `submit(task3)` | **`success`** ✅ |
+
+Placar do episódio: `adopt 2/2`, `request 2/2`, `attach 2/2`, `submit 1` (o segundo worker também coletou bloco). A navegação é **por visão + exploração** (sem coordenada absoluta no worker, que divergia no toro — ver D1/D3), com uma **camada de mapa** subsidiária que só ruma a um alvo *conhecido* quando ele não está visível e cede para a visão assim que ele entra no raio 5.
+
+**Causa-raiz do bloqueio histórico (descasamento átomo × string).** O `request → attach → submit` nunca havia sido observado porque a camada de **visão do worker** comparava o tipo do bloco por **unificação crua**: o tipo da tarefa chega do coordenador via CArtAgO como **string** `"b1"`, mas o tipo no percept `thing(_,_,dispenser,b1)` é um **átomo** `b1` — `"b1" \= b1`, então o worker *nunca reconhecia* o dispenser do tipo certo (embora o **registro/descoberta** funcionasse para os três tipos `b0`/`b1`/`b2`, que sempre foram mapeados). Correção: o tipo da tarefa é **convertido a átomo na origem** (`.term2string` com 1º argumento livre, guardado em `tipo_alvo`) e usado por unificação pura em toda a coleta — é o mesmo bug átomo/string já corrigido no coordenador, que faltava replicar aqui. Diagnóstico viabilizado pela instrumentação `[DIAGW]` (estado da máquina de coleta por passo) e por uma correção de *deadlock* na espera do bloco (timeout `max_espera_bloco`). Após o `submit` bem-sucedido, o worker **libera o estado** (`reset_pos_submit`) e volta a explorar / assumir nova tarefa.
 
 ### D3 — Exploração por cobertura (varredura serpentina) em vez de *random walk*
 
