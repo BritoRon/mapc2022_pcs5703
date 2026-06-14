@@ -233,16 +233,10 @@ public class EISArtifact extends Artifact {
         try {
             defineObsProperty(p.getName(), params);
         } catch (Exception e) {
-            // [DEBUG] revela falhas de defineObsProperty (antes engolidas).
-            // Mostra o tipo de cada param para diagnosticar incompatibilidade.
-            StringBuilder tipos = new StringBuilder();
-            for (Object o : params) {
-                tipos.append(o == null ? "null" : o.getClass().getSimpleName());
-                tipos.append("=").append(o).append(" ");
-            }
-            System.out.println("[ADDFAIL:" + entityName + "] " + p.getName()
-                + "/" + params.length + " : " + e.getClass().getSimpleName()
-                + " : " + e.getMessage() + " | params: " + tipos);
+            // Nao engolir silenciosamente: uma falha aqui significa que um percept
+            // nao virou crenca. Aviso conciso (sem dump verboso de tipos).
+            System.out.println("[EISArtifact] falha ao publicar percept "
+                + p.getName() + "/" + params.length + ": " + e.getMessage());
         }
     }
 

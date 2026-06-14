@@ -153,10 +153,3 @@ tem_dispenser(T) :- .term2string(T, TS) & dispenser_descoberto(_, _, TS).
  */
 tipo_pref_ok(_) :- not tipo_preferido(_).
 tipo_pref_ok(T) :- tipo_preferido(P) & .term2string(P, S) & .term2string(T, S).
-
-// [DEBUG passo 3] loga cada task nova (uma vez) com tamanho e requisitos,
-// para sabermos se aparecem tasks de 1 bloco com requisito cardinal.
-+task(N, D, R, Reqs) : not ja_vi_task(N) <-
-    +ja_vi_task(N);
-    .length(Reqs, Tam);
-    .print("[TASKINFO] ", N, " size=", Tam, " reward=", R, " reqs=", Reqs).

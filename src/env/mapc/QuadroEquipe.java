@@ -68,16 +68,6 @@ public class QuadroEquipe extends Artifact {
     private final Set<String> roleZonesVistas    = new HashSet<>();
 
     /*
-     * [INSTRUMENTACAO DE TESTE - passo 1] Ultima posicao relatada por agente,
-     * usada apenas para imprimir o heartbeat de posicao quando ela MUDA (e
-     * nao a cada step). Como os .print dos agentes sao engolidos em ambiente
-     * headless, usamos System.out daqui para enxergar o passo 1 ao vivo.
-     * Pode remover este Map e os prints quando a observabilidade nao for mais
-     * necessaria.
-     */
-    private final Map<String, String> ultimaPosRelatada = new HashMap<>();
-
-    /*
      * [Passo 2] Posicao publicada por cada agente (no frame proprio dele).
      * Mantemos a referencia da ObsProperty por agente para atualizar em vez
      * de duplicar. Vira a crenca pos_agente(Nome,X,Y) em todos os focados.
@@ -180,8 +170,6 @@ public class QuadroEquipe extends Artifact {
     void registrar_dispenser(int x, int y, String tipo) {
         if (dispensersVistos.add(x + "," + y + "," + tipo)) {
             defineObsProperty("dispenser_descoberto", x, y, tipo);
-            System.out.println("[QUADRO] +dispenser(" + x + "," + y + "," + tipo
-                + ")  total=" + dispensersVistos.size());
         }
     }
 
@@ -190,8 +178,6 @@ public class QuadroEquipe extends Artifact {
     void registrar_goal(int x, int y) {
         if (goalsVistas.add(x + "," + y)) {
             defineObsProperty("goal_descoberta", x, y);
-            System.out.println("[QUADRO] +goal(" + x + "," + y
-                + ")  total=" + goalsVistas.size());
         }
     }
 
@@ -200,8 +186,6 @@ public class QuadroEquipe extends Artifact {
     void registrar_taskboard(int x, int y) {
         if (taskboardsVistos.add(x + "," + y)) {
             defineObsProperty("taskboard_descoberto", x, y);
-            System.out.println("[QUADRO] +taskboard(" + x + "," + y
-                + ")  total=" + taskboardsVistos.size());
         }
     }
 
@@ -210,8 +194,6 @@ public class QuadroEquipe extends Artifact {
     void registrar_rolezone(int x, int y) {
         if (roleZonesVistas.add(x + "," + y)) {
             defineObsProperty("rolezone_descoberta", x, y);
-            System.out.println("[QUADRO] +rolezone(" + x + "," + y
-                + ")  total=" + roleZonesVistas.size());
         }
     }
 
@@ -230,21 +212,4 @@ public class QuadroEquipe extends Artifact {
         }
     }
 
-    /**
-     * [INSTRUMENTACAO DE TESTE - passo 1] Heartbeat de posicao.
-     *
-     * Os exploradores chamam isto a cada step com sua posicao absoluta
-     * (referencial proprio, origem = onde nasceram). Imprimimos so quando a
-     * posicao MUDA, o que prova ao vivo que (a) o loop de step esta rodando,
-     * (b) as percepcoes chegam e (c) o rastreio de posicao (somatorio de
-     * moves bem-sucedidos) esta funcionando.
-     */
-    @OPERATION
-    void relatar_posicao(String agente, int x, int y) {
-        String atual = x + "," + y;
-        if (!atual.equals(ultimaPosRelatada.get(agente))) {
-            ultimaPosRelatada.put(agente, atual);
-            System.out.println("[POS] " + agente + " -> (" + x + "," + y + ")");
-        }
-    }
 }

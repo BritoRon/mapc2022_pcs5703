@@ -80,6 +80,7 @@ flag_identificar.          // passo 2: identificar companheiros por posicao-espe
 flag_selecionar_tarefa.    // passo 3: coordenador escolhe e anuncia a task-alvo (LIGADO)
 flag_virar_worker.         // passo 3: explorador vira worker e busca/monta o bloco (LIGADO)
 flag_submeter.             // passo 3/4: worker submete a tarefa numa goal zone (LIGADO)
+// flag_debug.             // diagnostico [DIAGW] da maquina de coleta (DESLIGADO; descomente p/ depurar)
 
 
 /* ===================================================================== */
@@ -192,11 +193,6 @@ delta(w, -1, 0).
 // Quando o servidor nos avisa que a simulacao acabou:
 +ranking(R) <-
     .print("SIM-END: terminamos em ", R, "o lugar.").
-
-
-// [DEBUG] Confirma que o bridge observable property -> crenca funciona para
-// os percepts do EIS (e nao so do QuadroEquipe).
-+step(S) <- .print("[DBGstep] step=", S).
 
 
 /* ===================================================================== */

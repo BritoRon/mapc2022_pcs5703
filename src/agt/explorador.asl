@@ -70,36 +70,20 @@
  */
 +actionID(ID) : ultimo_action_id(Last) & ID \== Last <-
     -+ultimo_action_id(ID);
-    .findall(r(A, R), (lastAction(A) & lastActionResult(R)), LAR);
-    .findall(t(S, TS, DL), (step(S) & timestamp(TS) & deadline(DL)), TL);
-    .print("[DBGres] ", LAR, " | step/ts/deadline: ", TL);
     !atualizar_posicao;
     !publicar_posicao;
-    !relatar_posicao_teste;
     !registrar_descobertas;
     !identificar_companheiros;
     !anunciar_offset_ref;
-    !logar_visao;
     !reset_pos_submit;
     !diag_worker;
     !escolher_acao(Acao);
     !executar(Acao);
-    acao_concluida.   
+    acao_concluida.
 // libera o perceiveLoop do EIS a consumir o proximo passo
 // actionID repetido (mesmo passo reprocessado pela ponte EIS): ignora,
 // garantindo UMA acao por passo.
 +actionID(_) <- true.
-
-
-/*
- * [INSTRUMENTACAO DE TESTE - passo 1] Publica a posicao no quadro para
- * imprimir o heartbeat via System.out (os .print do agente sao engolidos
- * em ambiente headless). Remover quando nao precisar mais observar.
- */
-+!relatar_posicao_teste : flag_mapear & posicao(X, Y) <-
-    .my_name(Eu);
-    relatar_posicao(Eu, X, Y).
-+!relatar_posicao_teste <- true.
 
 
 /* ===================================================================== */
@@ -167,24 +151,6 @@
  * handlers de mensagem (avistei_colega/seu_offset) ficam em agente_base.asl,
  * pois tanto exploradores quanto o coordenador participam do alinhamento.
  */
-
-
-/*
- * Loga os objetos de interesse na visao do agente, no proprio passo.
- * Util para entender o que o agente "ve" enquanto debugamos.
- */
-+!logar_visao <-
-    .findall(d(X,Y,T), thing(X,Y,dispenser,T), Disp);
-    .findall(g(X,Y),   goalZone(X,Y),           Goals);
-    .findall(z(X,Y),   roleZone(X,Y),           RZs);
-    .length(Disp, ND);
-    .length(Goals, NG);
-    .length(RZs,  NZ);
-    if (ND > 0 | NG > 0 | NZ > 0) {
-        .my_name(Eu);
-        .print("[", Eu, "] vejo ", ND, " dispenser(s), ",
-               NG, " goal zone(s), ", NZ, " role zone(s)");
-    }.
 
 
 /* ===================================================================== */
@@ -412,7 +378,7 @@ max_espera_bloco(5).
  * Mostra, a cada passo, o estado da maquina de coleta para diagnosticar
  * ONDE a fase B/C trava: papel adotado, task-alvo, dispensers do tipo
  * VISIVEIS (e onde), zonas visiveis, pedido pendente, espera e carga.   */
-+!diag_worker : sou_worker & tarefa_alvo(N, QX, QY, _) & tipo_alvo(T) <-
++!diag_worker : flag_debug & sou_worker & tarefa_alvo(N, QX, QY, _) & tipo_alvo(T) <-
     .my_name(Eu);
     .findall(d(DX,DY), dispenser_visivel(T, DX, DY), DispV);
     .findall(k(KX,KY), disp_conhecido(T, KX, KY),    DispK);
