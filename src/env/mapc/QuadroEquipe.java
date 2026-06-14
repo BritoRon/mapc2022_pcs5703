@@ -66,6 +66,8 @@ public class QuadroEquipe extends Artifact {
     private final Set<String> goalsVistas        = new HashSet<>();
     private final Set<String> taskboardsVistos   = new HashSet<>();
     private final Set<String> roleZonesVistas    = new HashSet<>();
+    // [Passo 5] dedup dos sinais de pronto-para-connect ("agente|task").
+    private final Set<String> prontosConnect     = new HashSet<>();
 
     /*
      * [Passo 2] Posicao publicada por cada agente (no frame proprio dele).
@@ -131,6 +133,44 @@ public class QuadroEquipe extends Artifact {
             getObsProperty("tarefa_alvo").updateValues(nome, qx, qy, tipo);
         } else {
             defineObsProperty("tarefa_alvo", nome, qx, qy, tipo);
+        }
+    }
+
+    /**
+     * [Passo 5 - MULTI-BLOCO] Anuncia uma task de 2 blocos com a atribuicao de
+     * papeis: quem SUBMETE (submitter) e quem AJUDA (helper), e a goal zone-alvo
+     * (coords no frame de referencia) onde a estrutura sera montada e submetida.
+     * Vira a crenca tarefa_multi(Nome,Submitter,Helper,GZx,GZy) nos agentes; os
+     * offsets/tipos de cada bloco eles leem do proprio percept task(N,...).
+     */
+    @OPERATION
+    void anunciar_tarefa_multi(String nome, String submitter, String helper, int gzx, int gzy) {
+        if (hasObsProperty("tarefa_multi")) {
+            getObsProperty("tarefa_multi").updateValues(nome, submitter, helper, gzx, gzy);
+        } else {
+            defineObsProperty("tarefa_multi", nome, submitter, helper, gzx, gzy);
+        }
+    }
+
+    /**
+     * [Passo 5 - BARREIRA] Um worker sinaliza que esta posicionado e pronto para
+     * o connect sincronizado da task. Vira pronto_connect(Agente,Task) visivel a
+     * todos: o parceiro so dispara connect quando ve o outro pronto (mesmo step).
+     * Idempotente por (agente,task).
+     */
+    @OPERATION
+    void sinalizar_pronto_connect(String agente, String task) {
+        String chave = agente + "|" + task;
+        if (prontosConnect.add(chave)) {
+            defineObsProperty("pronto_connect", agente, task);
+        }
+    }
+
+    /** Limpa o sinal de pronto de um agente (apos connect/desistencia). */
+    @OPERATION
+    void limpar_pronto_connect(String agente, String task) {
+        if (prontosConnect.remove(agente + "|" + task)) {
+            removeObsPropertyByTemplate("pronto_connect", agente, task);
         }
     }
 

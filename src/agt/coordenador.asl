@@ -115,26 +115,52 @@
  * Criterio: maior reward (.max ordena cand(R,...) pelo 1o arg).
  */
 +!selecionar_tarefa : flag_selecionar_tarefa & precisa_selecionar <-
-    // So tasks de 1 bloco, com requisito cardinal adjacente, E cujo tipo de
-    // bloco JA tem dispenser descoberto (senao a task e incompletavel agora).
+    // Prefere tasks de 1 bloco (confiaveis). So cardinais adjacentes, cujo tipo
+    // ja tem dispenser descoberto (senao incompletavel agora).
     .findall(cand(R, N, QX, QY, T),
              ( task(N, _, R, [req(QX, QY, T)]) & (math.abs(QX) + math.abs(QY)) == 1
                & tem_dispenser(T) & tipo_pref_ok(T) ),
              L);
     if (L \== []) {
         .max(L, cand(_, NB, QXB, QYB, TB));
-        .print("[COORD] task-alvo: ", NB, " | bloco ", TB, " em (", QXB, ",", QYB, ")");
+        .print("[COORD] task-alvo (1 bloco): ", NB, " | bloco ", TB, " em (", QXB, ",", QYB, ")");
         anunciar_tarefa_alvo(NB, QXB, QYB, TB);
+    } else {
+        // sem task de 1 bloco viavel -> tenta 2 blocos (se habilitado).
+        !selecionar_multi;
     }.
 // nada a (re)selecionar agora, ou nenhuma task viavel: nao faz nada.
 +!selecionar_tarefa <- true.
+
+/* ---- SELECAO DE TASK MULTI-BLOCO (2 blocos) -------------------------------
+ * Escolhe uma task de 2 blocos em que o 1o req e cardinal-adjacente (ANCORA do
+ * submitter) e AMBOS os tipos ja tem dispenser; exige uma goal zone conhecida
+ * (ponto de montagem). Atribui submitter=explorador1, helper=explorador2 e
+ * anuncia tarefa_multi(N,Sub,Helper,GZx,GZy). Os offsets/tipos de cada bloco os
+ * workers leem do proprio percept task(N,_,_,[req..,req..]).                 */
+cardinal2(X, Y) :- (math.abs(X) + math.abs(Y)) == 1.
+
++!selecionar_multi : flag_multibloco & goal_descoberta(GZX, GZY) <-
+    .findall(cm(R, N),
+             ( task(N, _, R, [req(AX, AY, AT), req(_, _, BT)])
+               & cardinal2(AX, AY) & tem_dispenser(AT) & tem_dispenser(BT) ),
+             L);
+    if (L \== []) {
+        .max(L, cm(_, NB));
+        .print("[COORD] task-multi (2 blocos): ", NB,
+               " | sub=explorador1 helper=explorador2 | montagem gz(", GZX, ",", GZY, ")");
+        anunciar_tarefa_multi(NB, "explorador1", "explorador2", GZX, GZY);
+    }.
+// multi desabilitado, sem goal zone conhecida, ou sem task de 2 blocos viavel.
++!selecionar_multi <- true.
 
 /*
  * Precisa selecionar quando ainda nao ha alvo, ou quando o alvo atual
  * expirou (nao consta mais entre as tasks ativas).
  */
-precisa_selecionar :- not tarefa_alvo(_, _, _, _).
+precisa_selecionar :- not tarefa_alvo(_, _, _, _) & not tarefa_multi(_, _, _, _, _).
 precisa_selecionar :- tarefa_alvo(N, _, _, _) & not task(N, _, _, _).
+precisa_selecionar :- tarefa_multi(N, _, _, _, _) & not task(N, _, _, _).
 
 /*
  * Existe dispenser do tipo T no mapa compartilhado? Robusto ao tipo do bloco
