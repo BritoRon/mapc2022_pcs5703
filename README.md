@@ -205,12 +205,13 @@ Placar do episódio: `adopt 2/2`, `request 2/2`, `attach 2/2`, `submit 1` (o seg
 
 | Item do enunciado | Onde está no projeto |
 |---|---|
-| **Item 2** — Análise e especificação do SMA | A definir no relatório, ancorado em [src/org/org.xml](src/org/org.xml) (papéis, missões, normas) |
-| **Item 3** — Arquitetura e design do SMA | [mapc2022.jcm](mapc2022.jcm) (visão geral) + [src/org/org.xml](src/org/org.xml) (organização) + [src/env/mapc/QuadroEquipe.java](src/env/mapc/QuadroEquipe.java) (ambiente) |
-| **Item 4** — Linguagens e plataforma | Jason (agentes), CArtAgO (ambiente), MOISE+ (org), tudo orquestrado por JaCaMo 1.3.0 |
-| **Item 5** — Estratégia para time | A desenvolver: lógica em [src/agt/coordenador.asl](src/agt/coordenador.asl) (escolha de tarefa) e [src/agt/explorador.asl](src/agt/explorador.asl) (movimentação) |
-| **Item 6** — Características técnicas | Robustez: tratamento de timeout, recuperação de agentes individuais (a evoluir) |
-| **Item 7** — Discussão | Diferencial deste trabalho: uso explícito de MOISE+, ausente em [5] LTI-USP e nos JaCaMo Builders 2020/21 |
+| **Item 1** — Introdução e objetivo | Time JaCaMo para o MAPC 2022 (*Agents Assemble II*). Objetivo: evoluir o esqueleto trivial (random walk + skip) para um time que **descobre recursos, coordena-se e completa tarefas**. Visão geral no topo deste README e em [CLAUDE.md](CLAUDE.md). |
+| **Item 2** — Análise e especificação do SMA | Organização em [src/org/org.xml](src/org/org.xml): 3 papéis sociais (`coordinator`/`explorer`/`worker`), esquema `completar_tarefa`, missões `m_coordenar`/`m_explorar`/`m_construir`, normas de obrigação. Especificação do **problema físico** (grid **toroidal**, percepção **relativa**, cadência por step) em **D1** e em [§ Como o servidor é configurado](#como-o-servidor-do-contest-massim-2022-é-configurado). |
+| **Item 3** — Arquitetura e design do SMA | [mapc2022.jcm](mapc2022.jcm) (acoplamento agentes↔workspace↔organização), [src/env/mapc/QuadroEquipe.java](src/env/mapc/QuadroEquipe.java) (blackboard CArtAgO compartilhado) e [src/env/mapc/EISArtifact.java](src/env/mapc/EISArtifact.java) (ponte EISMASSim, uma `@OPERATION` por ação). Decisões de design registradas em **D1–D4**. |
+| **Item 4** — Linguagens e plataforma | **Jason** (agentes BDI), **CArtAgO** (ambiente/artefatos), **MOISE+** (organização), orquestrados por **JaCaMo 1.3.0**; ponte **EISMASSim** (TCP) ao servidor MASSim 2022. |
+| **Item 5** — Estratégia para o time | **Implementada e validada ao vivo para tarefas de 1 bloco:** exploração por **cobertura serpentina** (**D3**); **memória de mapa** relativa→absoluta + **identificação de companheiros** e fusão por *frame* de referência (passos 1–2); **protocolo de tarefa** `selecionar→anunciar→promover→adotar→buscar→submeter` (**D2**), com **preferência de tipo** opcional no coordenador. Multi-bloco (`connect`) **projetado** em **D4**. Lógica em [src/agt/coordenador.asl](src/agt/coordenador.asl) e [src/agt/explorador.asl](src/agt/explorador.asl). |
+| **Item 6** — Características técnicas | Robustez validada: **sincronização perceber↔agir** (`await` no EISArtifact) e **dedupe de `actionID`** (resolveu ~74% de passos perdidos → ~0); **anti-deadlock** na coleta (`max_espera_bloco` + timeout); **reset pós-`submit`**; **navegação robusta ao toro** (percepção relativa, **D1**); e tratamento do recorrente **descasamento átomo×string** na fronteira Jason/CArtAgO. |
+| **Item 7** — Discussão | Diferencial: uso **explícito de MOISE+**, ausente em [5] LTI-USP e nos JaCaMo Builders 2020/21. Lições aprendidas: (a) o grid **toroidal** inviabiliza navegação por coordenada absoluta — a percepção relativa é a base correta; (b) o descasamento **átomo×string** entre o tipo da task (CArtAgO→string) e o percept (átomo) foi a causa-raiz recorrente que bloqueava a coleta; (c) só a **validação ao vivo** (não a inspeção do código) revelou esses defeitos. |
 
 ## Próximos passos sugeridos
 
@@ -221,6 +222,20 @@ Roadmap original do esqueleto (1–4). **Estado atual:** itens 1–4 implementad
 3. **Protocolo de tarefa** ✅ — coordenador seleciona/anuncia a task (modelo 2022: **sem** taskboard); exploradores se promovem a `worker`, adotam o papel de cenário, buscam e anexam o bloco.
 4. **Submissão** ✅ — `request → attach → submit(NomeTask)` numa goal zone, validado para os três tipos de bloco (`b0`/`b1`/`b2`).
 5. **Tarefas multi-bloco (`connect`)** — projetado em **D4**, ainda não implementado.
+
+## Resultados e conclusão
+
+**O que foi construído.** Partindo de um esqueleto que apenas *conectava, percebia e agia* (com lógica trivial de *random walk* + `skip`), o time evoluiu para um SMA que **descobre recursos**, **constrói e funde um mapa compartilhado**, **identifica companheiros** e **executa o ciclo completo de uma tarefa de 1 bloco** no modelo MAPC 2022. A inteligência está nos agentes Jason (`coordenador.asl`, `explorador.asl`), o estado compartilhado no artefato CArtAgO (`QuadroEquipe.java`) e a organização em MOISE+ (`org.xml`).
+
+**O que foi validado ao vivo** (cenário controlado `DemoConfig`, 30×30 — ver **D2**):
+
+- Pipeline de tarefa **ponta a ponta**: `selecionar → anunciar → promover a worker → adotar papel → buscar bloco → request → attach → submit`, com `submit success`.
+- **Generalidade aos três tipos de bloco** (`b0`/`b1`/`b2`), confirmando que a coleta não é *hardcoded* (em um episódio, **os dois** workers completaram a tarefa de `b2`).
+- **Eliminação de ~74% de passos perdidos** (`no_action`) via sincronização perceber↔agir, e **navegação estável no grid toroidal** (sem o *runaway* de posição que corrompia o mapa).
+
+**Contribuições técnicas e lições.** (a) Em um grid **toroidal de tamanho desconhecido**, a navegação correta é por **percepção relativa** a alvos visíveis, com o mapa absoluto servindo só como camada subsidiária (**D1**). (b) A fronteira **Jason↔CArtAgO** reintroduz silenciosamente o descasamento **átomo×string** (tipo da task como `"b1"` vs. percept `b1`) — foi a causa-raiz que bloqueava a coleta, resolvida convertendo o tipo a átomo na origem. (c) Defeitos como esses **só apareceram em execução ao vivo**, não na inspeção do código — daí o investimento em instrumentação e num cenário de teste determinístico.
+
+**Limitações e trabalho futuro.** O pipeline cobre tarefas de **1 bloco**; tarefas **multi-bloco** (que exigem `connect` cooperativo e sincronizado entre dois agentes) estão **projetadas mas não implementadas** (**D4**). Outras frentes: leilão entre workers pela proximidade ao dispenser, uso de `clear`/`digger` para desencurralar, e estimativa do tamanho do grid para coordenadas modulares.
 
 ## Referências consultadas
 
