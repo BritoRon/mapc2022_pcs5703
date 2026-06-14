@@ -22,6 +22,11 @@
 
 { include("agente_base.asl") }
 
+// [VALIDACAO] Forca o coordenador a so anunciar tasks deste tipo de bloco.
+// Descomente e ajuste (b0/b1/b2) para validar cada tipo de forma deterministica.
+// Em operacao normal, MANTENHA COMENTADO (qualquer tipo serve).
+// tipo_preferido(b2).
+
 
 /* ===================================================================== */
 /* META INICIAL                                                           */
@@ -114,7 +119,7 @@
     // bloco JA tem dispenser descoberto (senao a task e incompletavel agora).
     .findall(cand(R, N, QX, QY, T),
              ( task(N, _, R, [req(QX, QY, T)]) & (math.abs(QX) + math.abs(QY)) == 1
-               & tem_dispenser(T) ),
+               & tem_dispenser(T) & tipo_pref_ok(T) ),
              L);
     if (L \== []) {
         .max(L, cand(_, NB, QXB, QYB, TB));
@@ -138,6 +143,16 @@ precisa_selecionar :- tarefa_alvo(N, _, _, _) & not task(N, _, _, _).
  */
 tem_dispenser(T) :- dispenser_descoberto(_, _, T).
 tem_dispenser(T) :- .term2string(T, TS) & dispenser_descoberto(_, _, TS).
+
+/*
+ * PREFERENCIA OPCIONAL de tipo de bloco. Se nao houver tipo_preferido(_), todos
+ * os tipos servem (comportamento normal). Se houver, so tasks daquele tipo sao
+ * candidatas. Util para estrategia (priorizar tipo com dispenser mais perto) e
+ * para VALIDACAO determinística de cada tipo (b0/b1/b2). Comparacao simetrica
+ * via .term2string (robusta a ATOMO da task vs eventual STRING).
+ */
+tipo_pref_ok(_) :- not tipo_preferido(_).
+tipo_pref_ok(T) :- tipo_preferido(P) & .term2string(P, S) & .term2string(T, S).
 
 // [DEBUG passo 3] loga cada task nova (uma vez) com tamanho e requisitos,
 // para sabermos se aparecem tasks de 1 bloco com requisito cardinal.
