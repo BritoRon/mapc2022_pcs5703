@@ -80,7 +80,7 @@ flag_identificar.          // passo 2: identificar companheiros por posicao-espe
 flag_selecionar_tarefa.    // passo 3: coordenador escolhe e anuncia a task-alvo (LIGADO)
 flag_virar_worker.         // passo 3: explorador vira worker e busca/monta o bloco (LIGADO)
 flag_submeter.             // passo 3/4: worker submete a tarefa numa goal zone (LIGADO)
-// flag_debug.             // diagnostico [DIAGW] da maquina de coleta (DESLIGADO; descomente p/ depurar)
+// flag_debug.             // diagnostico [DIAGW]/[DIAGE] da coleta/exploracao (DESLIGADO; descomente p/ depurar)
 
 
 /* ===================================================================== */
@@ -119,7 +119,9 @@ delta(w, -1, 0).
     <- -+pos_anterior(X, Y);   // de onde vim (anti-oscilacao na navegacao)
        NX = X + DX;
        NY = Y + DY;
-       -+posicao(NX, NY).
+       -+posicao(NX, NY);
+       // memoria de celulas ja pisadas (vies de cobertura: preferir o novo).
+       if (not visitado(NX, NY)) { +visitado(NX, NY); }.
 // Caso default: primeira jogada, acao nao foi move, ou move falhou -> nada.
 +!atualizar_posicao <- true.
 

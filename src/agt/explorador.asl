@@ -78,6 +78,7 @@
     !reset_pos_submit;
     !diag_worker;
     !escolher_acao(Acao);
+    !diag_explora(Acao);
     !executar(Acao);
     acao_concluida.
 // libera o perceiveLoop do EIS a consumir o proximo passo
@@ -230,6 +231,10 @@ rolezone_conhecida(X, Y) :- rolezone_descoberta(RX, RY) & offset_ref(RDX, RDY)
 volta_atras(D) :- delta(D, DX, DY) & posicao(X, Y) & pos_anterior(PX, PY)
                   & PX == X + DX & PY == Y + DY.
 livre_ok(D)    :- direcao_livre(D) & not volta_atras(D).
+// livre_novo(D): livre, nao volta atras E leva a uma celula AINDA NAO visitada.
+// Vies de cobertura - escapa de bolsoes rumo a area nova (em vez de quicar).
+livre_novo(D)  :- livre_ok(D) & delta(D, DX, DY) & posicao(X, Y)
+                  & TX = X + DX & TY = Y + DY & not visitado(TX, TY).
 
 /*
  * ALVO MAIS PROXIMO (Manhattan) de cada tipo, no frame proprio. Reduz passos
@@ -282,27 +287,65 @@ cob_leg(20).   // perna longa: varre faixas largas (melhor cobertura)   // compr
 +!init_cobertura(explorador2) <- +cob_dir(s); +cob_perp(e); ?cob_leg(N); +cob_passos(N).
 +!init_cobertura(_)           <- +cob_dir(n); +cob_perp(e); ?cob_leg(N); +cob_passos(N).
 
-// Segue a direcao primaria enquanto livre e ainda ha passos na perna.
-+!explorar(move(D)) : cob_dir(D) & cob_passos(N) & N > 0 & direcao_livre(D) <-
+// PRIORIDADE DE COBERTURA (frontier-com-momentum), antes da serpentina rigida:
+// (1) se o rumo atual leva a area NOVA, segue reto (linhas longas, boa cobertura).
++!explorar(move(D)) : cob_dir(D) & livre_novo(D) <-
+    ?cob_leg(N);  -+cob_passos(N).
+// (2) rumo atual nao leva a area nova, mas ha area nova adjacente -> vira pra la
+// e recompromete o rumo. Escapa de cavidades sem quicar (bug observado ao vivo:
+// a serpentina seguia o rumo para dentro de um buraco visitado de 2 celulas).
++!explorar(move(Dir)) : livre_novo(_) <-
+    !dir_novo_aleatoria(Dir);  -+cob_dir(Dir);  ?cob_leg(N);  -+cob_passos(N).
+// (2b) ESCAPE-BY-CLEAR: nao ha area nova ANDAVEL (livre_novo vazio), mas ha
+// obstaculo adjacente e energia -> CAVA para abrir frente nova, em vez de vagar/
+// circular pelo territorio ja explorado (loop 2x3 e bolsao selado observados ao
+// vivo). Cavar tem prioridade sobre andar-no-explorado, nao sobre andar-no-novo.
++!explorar(clear(DX,DY)) : not livre_novo(_) & energia_ok & obstaculo_adjacente(DX,DY) <-
+    .my_name(Eu);
+    .print("[", Eu, "] sem frente nova; cavando (", DX, ",", DY, ") p/ abrir caminho").
+// (3) sem area nova adjacente: cai na serpentina/desvio (varre/sai do explorado).
+// Segue a direcao primaria enquanto LIVRE E SEM VOLTAR ATRAS (livre_ok) e ainda
+// ha passos na perna. Usar livre_ok (nao direcao_livre) impede seguir o rumo de
+// volta para dentro de um beco ja visitado (oscilacao residual observada ao vivo).
++!explorar(move(D)) : cob_dir(D) & cob_passos(N) & N > 0 & livre_ok(D) <-
     -+cob_passos(N-1).
 // Fim da perna (N=0) OU primaria bloqueada -> passo PERPENDICULAR (se livre),
 // reverte a primaria e reinicia a contagem da perna.
 +!explorar(move(P)) : cob_perp(P) & direcao_livre(P) & cob_dir(D)
                       & (cob_passos(0) | not direcao_livre(D)) <-
     !reverter_dir(D);  ?cob_leg(N);  -+cob_passos(N).
-// Primaria e perpendicular bloqueadas -> desvia por qualquer direcao livre.
+// Hora de virar, mas a perpendicular NORMAL esta bloqueada: vira pela perpendicular
+// OPOSTA (mantem a varredura sistematica, so deriva para o outro lado).
++!explorar(move(Pop)) : cob_perp(P) & oposta(P, Pop) & direcao_livre(Pop) & cob_dir(D)
+                        & (cob_passos(0) | not direcao_livre(D)) <-
+    !reverter_dir(D);  ?cob_leg(N);  -+cob_passos(N).
+// Desvio nivel 1: ha direcao livre rumo a celula NAO-VISITADA -> vai pra la
+// (escapa de bolsoes/oscilacao indo para area nova) e recompromete o rumo.
++!explorar(move(Dir)) : livre_novo(_) <-
+    !dir_novo_aleatoria(Dir);
+    -+cob_dir(Dir);  ?cob_leg(N);  -+cob_passos(N).
+// Desvio nivel 2: sem celula nova, mas ha livre que NAO volta atras. Evita o
+// "sobe-desce uma casa" em corredores (oscilacao observada ao vivo) e RECOMPROMETE
+// o rumo - comeca uma perna nova na direcao livre, em vez de insistir num rumo bloqueado.
++!explorar(move(Dir)) : livre_ok(_) <-
+    !dir_livre_ok_aleatoria(Dir);
+    -+cob_dir(Dir);  ?cob_leg(N);  -+cob_passos(N).
+// Beco sem saida (sem obstaculo p/ cavar ou sem energia): a unica direcao livre e
+// voltar atras -> aceita (senao trava) e recompromete o rumo para sair.
 +!explorar(move(Dir)) : direcao_livre(_) <-
-    !dir_livre_aleatoria(Dir).
+    !dir_livre_aleatoria(Dir);
+    -+cob_dir(Dir);  ?cob_leg(N);  -+cob_passos(N).
 
 +!reverter_dir(e) <- -+cob_dir(w).
 +!reverter_dir(w) <- -+cob_dir(e).
 +!reverter_dir(s) <- -+cob_dir(n).
 +!reverter_dir(n) <- -+cob_dir(s).
-+!explorar(clear(DX,DY)) : obstaculo_adjacente(DX,DY) & energia_ok <-
-    .my_name(Eu);
-    .print("[", Eu, "] ENCURRALADO; cavando obstaculo em (", DX, ",", DY, ")").
+oposta(e, w).  oposta(w, e).  oposta(s, n).  oposta(n, s).
 +!explorar(skip) <- true.
 
++!dir_novo_aleatoria(Dir) <-
+    .findall(D, livre_novo(D), L);
+    .length(L, N);  .random(R);  I = math.floor(R * N);  .nth(I, L, Dir).
 +!dir_livre_ok_aleatoria(Dir) <-
     .findall(D, livre_ok(D), L);
     .length(L, N);  .random(R);  I = math.floor(R * N);  .nth(I, L, Dir).
@@ -396,6 +439,23 @@ max_espera_bloco(5).
            " | rz_vis=", NRZv, " rz_conh=", NRZk, " gz_vis=", NGZv, " gz_conh=", NGZk,
            " | pedi=", PB, " espera=", Esp, " carrega=", Carga).
 +!diag_worker <- true.
+
+/* ---- DIAGNOSTICO DE EXPLORACAO (gateado por flag_debug) ----
+ * Por passo, na fase de exploracao: posicao, resultado da ultima acao,
+ * direcoes livres / livres-sem-backtrack / livres-para-area-nova e a acao
+ * escolhida. Serve para diagnosticar oscilacao e moves que falham.        */
++!diag_explora(Acao) : flag_debug & not sou_worker & posicao(X, Y) <-
+    .findall(la(A,R), (lastAction(A) & lastActionResult(R)), LAR);
+    .findall(F,  direcao_livre(F), Livres);
+    .findall(O,  livre_ok(O),      OkL);
+    .findall(Nv, livre_novo(Nv),   NovoL);
+    .findall(ob(OX,OY), obstaculo_adjacente(OX,OY), Obst);
+    .findall(en, energia_ok, EnOk);
+    .my_name(Eu);
+    .print("[DIAGE] ", Eu, " pos(", X, ",", Y, ") ", LAR, " acao=", Acao,
+           " livres=", Livres, " ok=", OkL, " novo=", NovoL,
+           " obst=", Obst, " energia_ok=", EnOk).
++!diag_explora(_) <- true.
 
 /* ---- RESET POS-SUBMIT ----------------------------------------------------
  * Apos um submit BEM-SUCEDIDO (lastActionResult success no passo anterior), a
