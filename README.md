@@ -172,7 +172,7 @@ Placar do episódio: `adopt 2/2`, `request 2/2`, `attach 2/2`, `submit 1` (o seg
 
 ### D4 — Estratégia para tarefas multi-bloco (`connect`): projeto
 
-> **Estado: projetado, não implementado.** Esta seção documenta o desenho da estratégia para tarefas de 2+ blocos. O pipeline implementado e validado (D2) cobre tarefas de **1 bloco**; o multi-bloco é o próximo incremento.
+> **Estado: parcialmente implementado (coordenação validada; montagem ainda não fecha ao vivo).** O **coordenador** foi implementado e **validado ao vivo**: reconhece tasks de 2 blocos, atribui papéis (*submitter*/*helper*), escolhe a goal zone de montagem e anuncia (`tarefa_multi`). O **protocolo do worker** (busca → *rendezvous* → barreira → `connect` → `detach`/`submit`) está **escrito e compila**, mas **não fecha ao vivo**: a fase de **posicionar-se no dispenser** não converge no grid toroidal denso (o agente persegue o dispenser visível mais próximo, re-mirando a cada passo, e **deriva** sem encaixá-lo no offset exato), e a fase de `connect` sincronizado não chegou a ser exercida. Conforme o risco antecipado abaixo, **a montagem cooperativa ao vivo é trabalho futuro**. Por isso o multi-bloco fica **desativado por padrão** (`flag_multibloco`), para que no `sim2` do SampleConfig (todo multi-bloco) os agentes **explorem normalmente** em vez de operar o protocolo incompleto. O pipeline validado (D2) cobre tarefas de **1 bloco**.
 
 **Contexto.** Tarefas de maior recompensa exigem **estruturas** de vários blocos. A `req` de uma task é uma lista de offsets relativos ao agente que vai submeter, p.ex. `[req(0,1,b0), req(0,2,b1)]` — uma coluna de dois blocos ao sul do *submitter*. Completá-la muda qualitativamente o problema em relação ao bloco único.
 
