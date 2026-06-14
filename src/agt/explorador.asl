@@ -77,6 +77,7 @@
     !anunciar_offset_ref;
     !reset_pos_submit;
     !diag_worker;
+    !diag_multi;
     !escolher_acao(Acao);
     !diag_explora(Acao);
     !executar(Acao);
@@ -260,6 +261,8 @@ livre_novo(D)  :- livre_ok(D) & delta(D, DX, DY) & posicao(X, Y)
  *   2) Caso contrario -> exploracao dirigida (que tambem cava obstaculos
  *      se estiver encurralado).
  */
++!escolher_acao(Acao) : sou_multi & tarefa_multi(N,_,_,_,_) <-
+    !acao_multi(N, Acao).
 +!escolher_acao(Acao) : sou_worker & tarefa_alvo(N,QX,QY,_) & tipo_alvo(T) <-
     !acao_worker(N, QX, QY, T, Acao).
 +!escolher_acao(Acao) <-
@@ -545,3 +548,212 @@ max_espera_bloco(5).
 
 // fallback geral
 +!acao_worker(_, _, _, _, skip) <- true.
+
+/* ===================================================================== */
+/* PASSO 5: WORKER MULTI-BLOCO (2 blocos via connect cooperativo)         */
+/* ===================================================================== */
+/*
+ * Quando o coordenador anuncia tarefa_multi(N,Sub,Helper,GZx,GZy), os dois
+ * exploradores assumem papeis (submitter/helper). A task tem 2 reqs: a ANCORA
+ * (cardinal, adjacente ao submitter) e o SEGUNDO bloco (adjacente a ancora).
+ *
+ * Geometria (helper anexa SEU bloco ao SUL, em (0,1)):
+ *   - submitter S anexa a ancora em (AX,AY); fica numa goal zone, parado.
+ *   - helper posiciona-se em P_h = P_s + (BX, BY-1) -> seu bloco (P_h+(0,1))
+ *     cai em P_s+(BX,BY), adjacente a ancora.
+ *   - barreira pronto_connect: cada um so dispara connect quando ve o outro
+ *     pronto -> connect no MESMO step. S: connect(Helper,AX,AY). H: connect(Sub,0,1).
+ *   - apos connect: helper detach (bloco fica preso ao S via ancora); S submit.
+ * Alinhamento via posicao compartilhada: Sub=explorador1=frame de referencia
+ * (offset_ref(0,0)), entao pos_agente(Sub) ja esta em coords de referencia.
+ */
+@reagir_multi_sub
++tarefa_multi(N, Sub, _, _, _)
+    : flag_virar_worker & not sou_multi & not sou_worker
+      & .my_name(Eu) & .term2string(Eu, EuS) & EuS == Sub <-
+    +papel_multi(submitter);  +sou_multi;
+    .print("[MULTI] ", Eu, " = SUBMITTER da task ", N).
+@reagir_multi_helper
++tarefa_multi(N, _, Helper, _, _)
+    : flag_virar_worker & not sou_multi & not sou_worker
+      & .my_name(Eu) & .term2string(Eu, EuS) & EuS == Helper <-
+    +papel_multi(helper);  +sou_multi;
+    .print("[MULTI] ", Eu, " = HELPER da task ", N).
+
+// req ANCORA (cardinal, adjacente) e SEGUNDO (nao-cardinal) da task multi.
+anchor_req(N, QX, QY, T)  :- task(N,_,_,Reqs) & .member(req(QX,QY,T), Reqs)
+                             & (math.abs(QX) + math.abs(QY)) == 1.
+segundo_req(N, QX, QY, T) :- task(N,_,_,Reqs) & .member(req(QX,QY,T), Reqs)
+                             & (math.abs(QX) + math.abs(QY)) \== 1.
+
+// alvo do helper (frame proprio): P_s + (BX, BY-1). pos_agente(Sub) em ref
+// (Sub=explorador1, offset_ref(0,0)); helper converte ref->proprio (- offset_ref).
+alvo_helper(N, TX, TY) :- tarefa_multi(N, Sub, _, _, _) & segundo_req(N, BX, BY, _)
+                          & pos_agente(Sub, SX, SY) & offset_ref(ORDX, ORDY)
+                          & TX = SX - ORDX + BX & TY = SY - ORDY + BY - 1.
+
+// dispenser do tipo T VISIVEL mais proximo (Manhattan, coords ja relativas).
+// Alvo estavel: evita perseguir o "primeiro arbitrario" quando ha muitos do
+// mesmo tipo na visao (caso blockTypes unico).
++!alvo_disp_visivel_proximo(T, DX, DY) <-
+    .findall(d(Dist, X, Y), (dispenser_visivel(T, X, Y) & Dist = math.abs(X) + math.abs(Y)), L);
+    .min(L, d(_, DX, DY)).
+
+/* NAVEGACAO GULOSA PRECISA (rumo a (RX,RY), PERMITE recuar). Para POSICIONAR no
+ * dispenser e preciso poder recuar 1 celula para encaixa-lo no offset exato; o
+ * anti-backtrack de dir_gulosa faz o agente derivar no campo denso. Aqui usamos
+ * direcao_livre (sem livre_ok), garantindo convergencia ao alvo de curto alcance. */
++!mover_preciso(RX, RY, move(Dir)) : direcao_livre(_) <- !dir_greedy(RX, RY, Dir).
++!mover_preciso(_, _, Acao) <- !explorar(Acao).
++!dir_greedy(DX, DY, e) : DX > 0 & math.abs(DX) >= math.abs(DY) & direcao_livre(e) <- true.
++!dir_greedy(DX, DY, w) : DX < 0 & math.abs(DX) >= math.abs(DY) & direcao_livre(w) <- true.
++!dir_greedy(DX, DY, s) : DY > 0 & math.abs(DY) >  math.abs(DX) & direcao_livre(s) <- true.
++!dir_greedy(DX, DY, n) : DY < 0 & math.abs(DY) >  math.abs(DX) & direcao_livre(n) <- true.
++!dir_greedy(DX, _,  e) : DX > 0 & direcao_livre(e) <- true.
++!dir_greedy(DX, _,  w) : DX < 0 & direcao_livre(w) <- true.
++!dir_greedy(_,  DY, s) : DY > 0 & direcao_livre(s) <- true.
++!dir_greedy(_,  DY, n) : DY < 0 & direcao_livre(n) <- true.
++!dir_greedy(_,  _,  D) : direcao_livre(D) <- true.
+
+/* ---- adotar o papel de cenario "worker" (compartilhado) ---- */
++!adotar_worker(adopt(worker)) : roleZone(0,0) <- true.
++!adotar_worker(Acao) : rolezone_visivel(RX, RY) <- !mover_rel(RX, RY, Acao).
++!adotar_worker(Acao) : rolezone_conhecida(_, _) <-
+    !alvo_rolezone_proximo(TX, TY);  !mover_rumo(TX, TY, Acao).
++!adotar_worker(Acao) <- !explorar(Acao).
+
+/* ====================== SUBMITTER ====================== */
+// Fase A: adotar worker
++!acao_multi(_, Acao) : papel_multi(submitter) & not role(worker) <- !adotar_worker(Acao).
+// Fase B: buscar a ANCORA e anexar em (AX,AY)
++!acao_multi(N, request(Dir))
+    : papel_multi(submitter) & role(worker) & not carregando(_) & not pedi_bloco(_)
+      & anchor_req(N,AX,AY,AT) & dir_de_delta(AX,AY,Dir) & thing(AX,AY,dispenser,DT) & tipo_igual(AT,DT)
+    <- +pedi_bloco(Dir);  +espera_bloco(0).
++!acao_multi(N, attach(Dir))
+    : papel_multi(submitter) & role(worker) & not carregando(_) & pedi_bloco(Dir)
+      & anchor_req(N,AX,AY,_) & thing(AX,AY,block,_)
+    <- -pedi_bloco(Dir); .abolish(espera_bloco(_)); +carregando(ancora);
+       .my_name(Eu); .print("[MULTI] ", Eu, " (sub) anexou ancora em (",AX,",",AY,")").
++!acao_multi(_, skip)
+    : papel_multi(submitter) & role(worker) & not carregando(_) & pedi_bloco(_)
+      & espera_bloco(K) & max_espera_bloco(Max) & K < Max
+    <- Kp = K + 1;  -+espera_bloco(Kp).
++!acao_multi(N, Acao)
+    : papel_multi(submitter) & role(worker) & not carregando(_) & pedi_bloco(_)
+      & espera_bloco(K) & max_espera_bloco(Max) & K >= Max
+    <- .abolish(pedi_bloco(_)); .abolish(espera_bloco(_)); !acao_multi(N, Acao).
++!acao_multi(N, Acao)
+    : papel_multi(submitter) & role(worker) & not carregando(_) & not pedi_bloco(_)
+      & anchor_req(N,AX,AY,AT) & dispenser_visivel(AT,_,_)
+    <- !alvo_disp_visivel_proximo(AT, DX, DY);  // mira no MAIS PROXIMO (estavel)
+       RX = DX - AX;  RY = DY - AY;  !mover_preciso(RX, RY, Acao).
++!acao_multi(N, Acao)
+    : papel_multi(submitter) & role(worker) & not carregando(_) & not pedi_bloco(_)
+      & anchor_req(N,_,_,AT) & disp_conhecido(AT,_,_)
+    <- !alvo_disp_proximo(AT,TX,TY);  !mover_rumo(TX,TY,Acao).
++!acao_multi(_, Acao) : papel_multi(submitter) & role(worker) & not carregando(_) <-
+    !explorar(Acao).
+// Fase C: com a ancora, ir a goal zone, montar e submeter
+// (C1) ja conectei com sucesso -> SUBMETE
++!acao_multi(N, submit(N))
+    : papel_multi(submitter) & role(worker) & carregando(_) & goalZone(0,0) & flag_submeter
+      & lastAction(connect) & lastActionResult(success)
+    <- .my_name(Eu); .print("[MULTI] ", Eu, " (sub) SUBMETENDO ", N).
+// (C2) na goal zone, helper pronto e bloco dele ja no offset do 2o req -> CONNECT
++!acao_multi(N, connect(Helper, AX, AY))
+    : papel_multi(submitter) & role(worker) & carregando(_) & goalZone(0,0)
+      & tarefa_multi(N,_,Helper,_,_) & anchor_req(N,AX,AY,_) & segundo_req(N,BX,BY,_)
+      & thing(BX,BY,block,_) & pronto_connect(Helper, N)
+    <- .my_name(Eu); .print("[MULTI] ", Eu, " (sub) CONNECT ancora(",AX,",",AY,") c/ ", Helper).
+// (C3) na goal zone, ainda esperando -> sinaliza pronto e fica parado
++!acao_multi(N, skip)
+    : papel_multi(submitter) & role(worker) & carregando(_) & goalZone(0,0)
+    <- .my_name(Eu); sinalizar_pronto_connect(Eu, N).
+// (C4) navegar ate a goal zone (por visao / mapa)
++!acao_multi(_, Acao)
+    : papel_multi(submitter) & role(worker) & carregando(_) & goalzone_visivel(GX,GY)
+    <- !mover_rel(GX, GY, Acao).
++!acao_multi(_, Acao)
+    : papel_multi(submitter) & role(worker) & carregando(_) & goalzone_conhecida(_,_)
+    <- !alvo_goalzone_proximo(TX,TY);  !mover_rumo(TX,TY,Acao).
++!acao_multi(_, Acao) : papel_multi(submitter) & role(worker) & carregando(_) <-
+    !explorar(Acao).
+
+/* ====================== HELPER ====================== */
+// Fase A: adotar worker
++!acao_multi(_, Acao) : papel_multi(helper) & not role(worker) <- !adotar_worker(Acao).
+// Fase B: buscar o SEGUNDO bloco e anexar ao SUL (0,1)
++!acao_multi(N, request(s))
+    : papel_multi(helper) & role(worker) & not carregando(_) & not pedi_bloco(_)
+      & segundo_req(N,_,_,BT) & thing(0,1,dispenser,DT) & tipo_igual(BT,DT)
+    <- +pedi_bloco(s);  +espera_bloco(0).
++!acao_multi(_, attach(s))
+    : papel_multi(helper) & role(worker) & not carregando(_) & pedi_bloco(s) & thing(0,1,block,_)
+    <- -pedi_bloco(s); .abolish(espera_bloco(_)); +carregando(ajuda);
+       .my_name(Eu); .print("[MULTI] ", Eu, " (helper) anexou bloco ao sul (0,1)").
++!acao_multi(_, skip)
+    : papel_multi(helper) & role(worker) & not carregando(_) & pedi_bloco(_)
+      & espera_bloco(K) & max_espera_bloco(Max) & K < Max
+    <- Kp = K + 1;  -+espera_bloco(Kp).
++!acao_multi(N, Acao)
+    : papel_multi(helper) & role(worker) & not carregando(_) & pedi_bloco(_)
+      & espera_bloco(K) & max_espera_bloco(Max) & K >= Max
+    <- .abolish(pedi_bloco(_)); .abolish(espera_bloco(_)); !acao_multi(N, Acao).
++!acao_multi(N, Acao)
+    : papel_multi(helper) & role(worker) & not carregando(_) & not pedi_bloco(_)
+      & segundo_req(N,_,_,BT) & dispenser_visivel(BT,_,_)
+    <- !alvo_disp_visivel_proximo(BT, DX, DY);  // mira no MAIS PROXIMO (estavel)
+       RX = DX - 0;  RY = DY - 1;  !mover_preciso(RX, RY, Acao).
++!acao_multi(N, Acao)
+    : papel_multi(helper) & role(worker) & not carregando(_) & not pedi_bloco(_)
+      & segundo_req(N,_,_,BT) & disp_conhecido(BT,_,_)
+    <- !alvo_disp_proximo(BT,TX,TY);  !mover_rumo(TX,TY,Acao).
++!acao_multi(_, Acao) : papel_multi(helper) & role(worker) & not carregando(_) <-
+    !explorar(Acao).
+// Fase C: com o bloco, ir ao alvo (relativo ao submitter), alinhar, connect, detach
+// (C1) ja conectei com sucesso -> DETACH (bloco fica preso ao submitter via ancora)
++!acao_multi(_, detach(s))
+    : papel_multi(helper) & role(worker) & carregando(_)
+      & lastAction(connect) & lastActionResult(success)
+    <- .my_name(Eu); .print("[MULTI] ", Eu, " (helper) DETACH apos connect"); -+carregando(detached).
+// (C2) no alvo e submitter pronto -> CONNECT meu bloco (0,1) com o submitter
++!acao_multi(N, connect(Sub, 0, 1))
+    : papel_multi(helper) & role(worker) & carregando(ajuda)
+      & tarefa_multi(N,Sub,_,_,_) & alvo_helper(N,TX,TY) & posicao(X,Y) & X==TX & Y==TY
+      & pronto_connect(Sub, N)
+    <- .my_name(Eu); .print("[MULTI] ", Eu, " (helper) CONNECT bloco(0,1) c/ ", Sub).
+// (C3) no alvo, esperando -> sinaliza pronto e fica parado
++!acao_multi(N, skip)
+    : papel_multi(helper) & role(worker) & carregando(ajuda)
+      & alvo_helper(N,TX,TY) & posicao(X,Y) & X==TX & Y==TY
+    <- .my_name(Eu); sinalizar_pronto_connect(Eu, N).
+// (C4) tenho alvo (sei a posicao do submitter) -> navego ate ele
++!acao_multi(N, Acao)
+    : papel_multi(helper) & role(worker) & carregando(ajuda) & alvo_helper(N,TX,TY)
+    <- !mover_rumo(TX, TY, Acao).
+// (C5) sem alvo (sem pos do submitter ainda) -> vou a goal zone / exploro
++!acao_multi(_, Acao)
+    : papel_multi(helper) & role(worker) & carregando(_) & goalzone_conhecida(_,_)
+    <- !alvo_goalzone_proximo(TX,TY);  !mover_rumo(TX,TY,Acao).
++!acao_multi(_, Acao) : papel_multi(helper) & role(worker) & carregando(_) <-
+    !explorar(Acao).
+
+// fallback geral multi
++!acao_multi(_, skip) <- true.
+
+/* ---- DIAGNOSTICO MULTI-BLOCO (gateado por flag_debug) ---- */
++!diag_multi : flag_debug & sou_multi & papel_multi(P) & posicao(X,Y) <-
+    .findall(rw, role(worker), Rw);
+    .findall(c(C), carregando(C), Carga);
+    .findall(pb(D), pedi_bloco(D), PB);
+    .findall(a(AX,AY), anchor_req(_,AX,AY,_), Anc);
+    .findall(s(BX,BY), segundo_req(_,BX,BY,_), Seg);
+    .findall(dav, (anchor_req(_,_,_,AT) & dispenser_visivel(AT,_,_)), DAV);
+    .findall(rz, rolezone_conhecida(_,_), RZk);
+    .findall(ah(TX,TY), alvo_helper(_,TX,TY), AlvoH);
+    .my_name(Eu);
+    .print("[DIAGM] ", Eu, " papel=", P, " pos(",X,",",Y,") worker=", Rw,
+           " carrega=", Carga, " pedi=", PB, " anc=", Anc, " seg=", Seg,
+           " disp_anc_vis=", DAV, " rz_conh=", RZk, " alvo_h=", AlvoH).
++!diag_multi <- true.
