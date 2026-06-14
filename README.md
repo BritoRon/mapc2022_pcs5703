@@ -170,6 +170,37 @@ Placar do episódio: `adopt 2/2`, `request 2/2`, `attach 2/2`, `submit 1` (o seg
 
 **Limitação conhecida.** O comprimento da perna (`cob_leg`) idealmente acompanha a largura do grid; como o tamanho do grid não é perceptível, ele é um parâmetro ajustável (heurístico). Para o cenário de demo 30×30, `cob_leg = 20` deu boa cobertura.
 
+### D4 — Estratégia para tarefas multi-bloco (`connect`): projeto
+
+> **Estado: projetado, não implementado.** Esta seção documenta o desenho da estratégia para tarefas de 2+ blocos. O pipeline implementado e validado (D2) cobre tarefas de **1 bloco**; o multi-bloco é o próximo incremento.
+
+**Contexto.** Tarefas de maior recompensa exigem **estruturas** de vários blocos. A `req` de uma task é uma lista de offsets relativos ao agente que vai submeter, p.ex. `[req(0,1,b0), req(0,2,b1)]` — uma coluna de dois blocos ao sul do *submitter*. Completá-la muda qualitativamente o problema em relação ao bloco único.
+
+**Por que exige dois agentes (semântica do cenário).** Pela especificação (`docs/scenario.md`):
+
+- **`attach` só pega coisa adjacente** (distância 1, cardinal). Logo, um bloco exigido em `(0,2)` é **inalcançável** para um único agente — está a distância 2, e `rotate` preserva a distância ao agente, então não há como posicioná-lo sozinho.
+- Os padrões 2-bloco gerados são **conexos** (o 2º bloco encosta no 1º, não no agente). Portanto a junção bloco-a-bloco só acontece via **`connect`**, que é **cooperativo entre dois agentes**.
+- **`connect(parceiro, x, y)`**: ambos os agentes executam `connect` **no mesmo step**, cada um nomeando o outro e as **coords locais do seu próprio bloco**; os dois blocos precisam estar **adjacentes**. Após o sucesso, o bloco fica anexado aos **dois** agentes.
+- **`submit(task)`**: exige o *submitter* **sobre uma goal zone** com **todos** os blocos do padrão anexados nos offsets exatos.
+
+**Protocolo proposto (montagem na goal zone).** Decisão de projeto: usar uma **goal zone conhecida como ponto de encontro e montagem** — assim a estrutura já nasce onde o `submit` precisa ocorrer, eliminando um transporte final frágil no toro.
+
+1. **Coordenador** seleciona uma task de 2 blocos cujos *dois* tipos tenham dispenser descoberto e cuja goal zone esteja mapeada; atribui papéis — **`submitter`** (p.ex. `explorador1`) e **`helper`** (`explorador2`) — o bloco de cada um (por índice da `req`) e a goal zone-alvo; anuncia tudo no `QuadroEquipe`.
+2. **Cada worker** adota `worker`, busca seu bloco no dispenser do tipo (reusando a Fase A/B já validada) e o anexa.
+3. **Rendezvous:** ambos navegam (por visão) até a goal zone designada e assumem a **configuração de acoplamento** exata. Exemplo para `[req(0,1,b0), req(0,2,b1)]`: o `submitter` S fica com `b0` em `(0,1)`; o `helper` H se posiciona ao sul, com `b1` na célula que, vista de S, é `(0,2)` (i.e. os blocos `(Sx,Sy+1)` e `(Sx,Sy+2)` ficam adjacentes).
+4. **`connect` sincronizado:** no mesmo step, S faz `connect(H, 0, 1)` e H faz `connect(S, 0, -1)` (cada um aponta o offset local do seu bloco). Sincronização via *handshake* no blackboard + uma **barreira** (ambos sinalizam "pronto para acoplar" e só então emitem `connect` no passo seguinte).
+5. **`detach` + `submit`:** o helper faz `detach` do seu bloco (que permanece preso à estrutura de S via o `connect`); o submitter, já com o padrão completo sobre a goal zone, faz `submit(task)`.
+
+**Os três problemas difíceis e mitigações previstas.**
+
+- **Sincronização no mesmo step (`connect`/`connect`):** o `connect` falha (`failed_partner`) se o parceiro não fizer `connect` no mesmo passo. Mitigação: estado compartilhado `pronto_para_connect(Agente, Task)` no `QuadroEquipe` + ambos só disparam `connect` no primeiro step em que **veem o parceiro pronto** (barreira de duas fases). Como o servidor executa as ações do step em ordem aleatória mas no mesmo step, basta a co-ocorrência.
+- **Alinhamento preciso no grid toroidal:** posicionar dois agentes em células adjacentes específicas é frágil com coordenada absoluta (D1). Mitigação: alinhamento **por percepção relativa** — H enxerga S (são da mesma equipe e ficam próximos na goal zone) e ajusta seu offset por visão até a configuração de acoplamento, exatamente como o worker se posiciona no dispenser hoje.
+- **Encontro (rendezvous):** os dois precisam chegar à *mesma* goal zone. Mitigação: a goal zone-alvo é **fixada pelo coordenador** (uma só, conhecida por ambos via blackboard); navegação por mapa+visão (camada já existente) leva ambos até lá.
+
+**O que precisaria mudar no código.** (a) `QuadroEquipe`: anúncio rico da task multi-bloco (papéis, bloco por agente, goal zone-alvo) e o estado de barreira `pronto_para_connect`. (b) `coordenador.asl`: reconhecer `req` com 2 itens, checar dispensers dos dois tipos + goal zone, atribuir papéis. (c) `explorador.asl`: estender a máquina de estados do worker com o ramo multi-bloco (buscar bloco atribuído → ir à goal zone → alinhar por visão → barreira → `connect` → `detach`/`submit`). (d) **Bridge:** nada — `connect`, `detach`, `rotate` e `disconnect` **já estão expostos** como `@OPERATION` em `EISArtifact.java`.
+
+**Risco/avaliação.** O acoplamento sincronizado de dois agentes com alinhamento no toro é, reconhecidamente, a parte de maior risco de fechar ao vivo dentro de um episódio (sincronização + posicionamento exato). O projeto acima decompõe o problema em etapas já validadas isoladamente (busca/anexo de bloco, navegação por visão, estado compartilhado no blackboard) mais o `connect` sincronizado como única peça genuinamente nova.
+
 ## Como o exercício é atendido (mapeamento para o template do relatório)
 
 | Item do enunciado | Onde está no projeto |
@@ -183,12 +214,13 @@ Placar do episódio: `adopt 2/2`, `request 2/2`, `attach 2/2`, `submit 1` (o seg
 
 ## Próximos passos sugeridos
 
-Este esqueleto **conecta, percebe e age**, mas a inteligência ainda é trivial (random walk). Para evoluir, focar em:
+Roadmap original do esqueleto (1–4). **Estado atual:** itens 1–4 implementados e validados ao vivo para tarefas de **1 bloco** (ver D2). O próximo incremento é o **multi-bloco** (item 5), cujo **projeto** está documentado em **D4** (semântica do `connect`, protocolo de montagem na goal zone, atribuição de papéis).
 
-1. **Logs/memória de exploração** — `explorador.asl` precisa registrar dispensers, taskboards e goal zones que vir, em coordenadas absolutas relativas à posição inicial. Padrão: ver paper [5] §3.1.
-2. **Identificação de companheiros** — quando agentes se vêem, reconhecer-se via posição-espelho. Padrão: ver paper [5] §3.2.
-3. **Protocolo de tarefa** — o coordenador escolhe task no taskboard, anuncia no `QuadroEquipe`, agentes que adotam papel `worker` (compatível via `formation-constraints` no org.xml) buscam blocos.
-4. **Submissão** — montar pattern e chamar `submit(NomeTask)` numa goal zone.
+1. **Logs/memória de exploração** ✅ — `explorador.asl` registra dispensers e goal/role zones em coordenadas relativas à posição inicial, publicadas no `QuadroEquipe`. (paper [5] §3.1)
+2. **Identificação de companheiros** ✅ — reconhecimento por posição-espelho + fusão de mapa por *frame* de referência. (paper [5] §3.2)
+3. **Protocolo de tarefa** ✅ — coordenador seleciona/anuncia a task (modelo 2022: **sem** taskboard); exploradores se promovem a `worker`, adotam o papel de cenário, buscam e anexam o bloco.
+4. **Submissão** ✅ — `request → attach → submit(NomeTask)` numa goal zone, validado para os três tipos de bloco (`b0`/`b1`/`b2`).
+5. **Tarefas multi-bloco (`connect`)** — projetado em **D4**, ainda não implementado.
 
 ## Referências consultadas
 
