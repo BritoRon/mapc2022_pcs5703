@@ -121,6 +121,98 @@ ou seja, quando a chave `vision` está ausente, o papel **herda a visão do pape
 
 **Conclusão:** `worker`/`constructor`/`digger` têm **visão 5** (herdada), não são cegos. Por isso a estratégia de **navegação por percepção relativa** (mover-se rumo a alvos *visíveis*) funciona inclusive na fase de worker — escolha de projeto adotada justamente por ser robusta ao **grid toroidal** (ver decisão de design abaixo).
 
+## Método de desenvolvimento (Item 2)
+
+O SMA foi desenvolvido por um **método empírico, incremental e dirigido a testes ao vivo** contra o simulador oficial — em vez de um método de engenharia *a priori* (Prometheus, GAIA, O-MaSE). A escolha se justifica pela natureza do domínio: o MAPC 2022 tem **percepção relativa**, grid **toroidal** e dinâmica de passos que só se revelam em execução, de modo que a validação contínua contra o servidor foi mais informativa que a especificação antecipada.
+
+O ciclo de desenvolvimento adotado, repetido a cada incremento de funcionalidade, foi:
+
+1. **Implementar um esqueleto** da funcionalidade (ex.: mapa, identificação de companheiros, protocolo de tarefa), partindo da estrutura organizacional MOISE+ já definida.
+2. **Executar ao vivo** contra o servidor MASSim (cenário de teste controlado ou oficial) e **observar** o comportamento (logs operacionais + monitor web).
+3. **Diagnosticar a causa-raiz** de falhas via **instrumentação** (prints de diagnóstico gateados por `flag_debug`: `[DIAGW]`/`[DIAGE]`/`[DIAGM]`) — vários defeitos (descasamento átomo×string, deriva toroidal, oscilação de cobertura) **só apareceram em execução**, não na inspeção do código.
+4. **Corrigir** e **re-testar**; registrar a decisão em formato de relatório (seções D abaixo).
+5. **Teste de regressão** (rodar o pipeline validado após mudanças estruturais) e **commit** versionado a cada passo validado.
+
+Apoiaram o método: **cenários de teste controlados** (`DemoConfig`/`DemoConfig2`, pequenos e determinísticos, para *ver* o pipeline completar com frequência) separados do **cenário oficial** (`SampleConfig`, grande, com obstáculos, para validar robustez); e o **versionamento incremental** (um commit por decisão/validação) que preserva a rastreabilidade das escolhas.
+
+## Ambiente de execução (hardware e software) (Item 1)
+
+Configuração da máquina em que o SMA foi desenvolvido e testado:
+
+| Componente | Especificação |
+|---|---|
+| **CPU** | Intel® Core™ i5-4590 @ 3.30 GHz — 4 núcleos físicos |
+| **Memória RAM** | 12 GB (≈ 11 GB úteis) + 4 GB swap |
+| **Armazenamento** | SSD/HD 915 GB (raiz `/`) |
+| **Tipo** | Máquina física (*bare metal*, não virtualizada) |
+| **Sistema operacional** | Ubuntu 26.04 LTS — kernel Linux 7.0.0-22-generic (x86_64) |
+| **JDK** | OpenJDK 21.0.11 (64-Bit Server VM) |
+| **Build** | Gradle 8.10 |
+| **Arcabouço SMA** | JaCaMo 1.3.0 (Jason + CArtAgO + MOISE+) |
+| **Ponte / servidor** | EISMASSim (`lib/eismassim.jar`) ↔ MASSim 2022 (`server-2022-1.1`), TCP porta 12300 |
+
+O servidor MASSim e o time JaCaMo rodam em **dois processos** (mesma máquina ou em rede local); a comunicação é por TCP via EISMASSim.
+
+## Diagramas (organização e arquitetura) (Item 3)
+
+**Modelo organizacional MOISE+** (`src/org/org.xml`) — papéis, esquema social, missões e normas:
+
+```mermaid
+graph TD
+  subgraph EST["Especificação Estrutural — grupo grupo_time (instância time_a)"]
+    C["coordinator<br/>(1)"]
+    E["explorer<br/>(1..50)"]
+    W["worker<br/>(0..50)"]
+    E -. "compatibility<br/>(adoptRole)" .-> W
+  end
+  subgraph FUN["Especificação Funcional — esquema completar_tarefa"]
+    G(["meta: completar tarefa"])
+    MC["missão m_coordenar"]
+    ME["missão m_explorar"]
+    MW["missão m_construir"]
+    G --> MC
+    G --> ME
+    G --> MW
+  end
+  C == "norma n_coord<br/>(obrigação)" ==> MC
+  E == "norma n_expl<br/>(obrigação)" ==> ME
+  W == "norma n_work<br/>(obrigação)" ==> MW
+```
+
+**Arquitetura do SMA** — agentes Jason, ambiente CArtAgO (artefatos), organização MOISE+ e ponte para o servidor:
+
+```mermaid
+graph LR
+  subgraph JACAMO["JaCaMo 1.3.0 (um processo)"]
+    subgraph AG["Agentes Jason (.asl) — camada BDI"]
+      CO["coordenador1"]
+      X1["explorador1"]
+      X2["explorador2"]
+    end
+    subgraph CART["CArtAgO — ambiente / artefatos"]
+      Q["QuadroEquipe<br/>(blackboard compartilhado)"]
+      EAC["EISArtifact<br/>coordenador1"]
+      EA1["EISArtifact<br/>explorador1"]
+      EA2["EISArtifact<br/>explorador2"]
+    end
+    ORG["MOISE+<br/>OrgBoard time_a"]
+  end
+  SRV[("Servidor MASSim 2022<br/>cenário Agents Assemble")]
+
+  CO --- EAC
+  X1 --- EA1
+  X2 --- EA2
+  CO -. "focus / obs.props" .-> Q
+  X1 -. focus .-> Q
+  X2 -. focus .-> Q
+  AG -. "missões/normas" .-> ORG
+  EAC -- "EISMASSim TCP :12300" --> SRV
+  EA1 -- "EISMASSim TCP" --> SRV
+  EA2 -- "EISMASSim TCP" --> SRV
+```
+
+> Fluxo de um passo: o servidor envia percepções → cada `EISArtifact` as traduz em crenças (`thing(...)`, `goalZone(...)`, etc.) → o agente decide (`+actionID`) e age → a ação volta ao servidor pela mesma ponte. Descobertas relevantes são publicadas no `QuadroEquipe`, visível a todo o time sem troca de mensagens.
+
 ## Decisões de design e validação (formato de relatório)
 
 > Esta seção registra, em estilo de relatório, decisões técnicas tomadas durante o desenvolvimento e como foram validadas em testes ao vivo contra o servidor MASSim 2022. É material de apoio ao Item 5 (estratégia) e Item 6 (características técnicas) do enunciado.
@@ -205,9 +297,9 @@ Placar do episódio: `adopt 2/2`, `request 2/2`, `attach 2/2`, `submit 1` (o seg
 
 | Item do enunciado | Onde está no projeto |
 |---|---|
-| **Item 1** — Introdução e objetivo | Time JaCaMo para o MAPC 2022 (*Agents Assemble II*). Objetivo: evoluir o esqueleto trivial (random walk + skip) para um time que **descobre recursos, coordena-se e completa tarefas**. Visão geral no topo deste README e em [CLAUDE.md](CLAUDE.md). |
-| **Item 2** — Análise e especificação do SMA | Organização em [src/org/org.xml](src/org/org.xml): 3 papéis sociais (`coordinator`/`explorer`/`worker`), esquema `completar_tarefa`, missões `m_coordenar`/`m_explorar`/`m_construir`, normas de obrigação. Especificação do **problema físico** (grid **toroidal**, percepção **relativa**, cadência por step) em **D1** e em [§ Como o servidor é configurado](#como-o-servidor-do-contest-massim-2022-é-configurado). |
-| **Item 3** — Arquitetura e design do SMA | [mapc2022.jcm](mapc2022.jcm) (acoplamento agentes↔workspace↔organização), [src/env/mapc/QuadroEquipe.java](src/env/mapc/QuadroEquipe.java) (blackboard CArtAgO compartilhado) e [src/env/mapc/EISArtifact.java](src/env/mapc/EISArtifact.java) (ponte EISMASSim, uma `@OPERATION` por ação). Decisões de design registradas em **D1–D4**. |
+| **Item 1** — Introdução e objetivo | Time JaCaMo para o MAPC 2022 (*Agents Assemble II*). Objetivo: evoluir o esqueleto trivial (random walk + skip) para um time que **descobre recursos, coordena-se e completa tarefas**. Visão geral no topo deste README e em [CLAUDE.md](CLAUDE.md). **Hardware/software** em [§ Ambiente de execução](#ambiente-de-execução-hardware-e-software-item-1). |
+| **Item 2** — Análise e especificação do SMA | **Método de desenvolvimento** (empírico, dirigido a testes ao vivo) em [§ Método de desenvolvimento](#método-de-desenvolvimento-item-2). Organização em [src/org/org.xml](src/org/org.xml): 3 papéis sociais (`coordinator`/`explorer`/`worker`), esquema `completar_tarefa`, missões `m_coordenar`/`m_explorar`/`m_construir`, normas de obrigação. Especificação do **problema físico** (grid **toroidal**, percepção **relativa**, cadência por step) em **D1** e em [§ Como o servidor é configurado](#como-o-servidor-do-contest-massim-2022-é-configurado). |
+| **Item 3** — Arquitetura e design do SMA | **Diagramas** (modelo MOISE+ e arquitetura) em [§ Diagramas](#diagramas-organização-e-arquitetura-item-3). [mapc2022.jcm](mapc2022.jcm) (acoplamento agentes↔workspace↔organização), [src/env/mapc/QuadroEquipe.java](src/env/mapc/QuadroEquipe.java) (blackboard CArtAgO compartilhado) e [src/env/mapc/EISArtifact.java](src/env/mapc/EISArtifact.java) (ponte EISMASSim, uma `@OPERATION` por ação). Decisões de design registradas em **D1–D4**. |
 | **Item 4** — Linguagens e plataforma | **Jason** (agentes BDI), **CArtAgO** (ambiente/artefatos), **MOISE+** (organização), orquestrados por **JaCaMo 1.3.0**; ponte **EISMASSim** (TCP) ao servidor MASSim 2022. |
 | **Item 5** — Estratégia para o time | **Implementada e validada ao vivo para tarefas de 1 bloco:** exploração por **cobertura serpentina** (**D3**); **memória de mapa** relativa→absoluta + **identificação de companheiros** e fusão por *frame* de referência (passos 1–2); **protocolo de tarefa** `selecionar→anunciar→promover→adotar→buscar→submeter` (**D2**), com **preferência de tipo** opcional no coordenador. Multi-bloco (`connect`) **projetado** em **D4**. Lógica em [src/agt/coordenador.asl](src/agt/coordenador.asl) e [src/agt/explorador.asl](src/agt/explorador.asl). |
 | **Item 6** — Características técnicas | Robustez validada: **sincronização perceber↔agir** (`await` no EISArtifact) e **dedupe de `actionID`** (resolveu ~74% de passos perdidos → ~0); **anti-deadlock** na coleta (`max_espera_bloco` + timeout); **reset pós-`submit`**; **navegação robusta ao toro** (percepção relativa, **D1**); e tratamento do recorrente **descasamento átomo×string** na fronteira Jason/CArtAgO. |
