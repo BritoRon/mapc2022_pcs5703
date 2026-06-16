@@ -80,7 +80,7 @@ flag_identificar.          // passo 2: identificar companheiros por posicao-espe
 flag_selecionar_tarefa.    // passo 3: coordenador escolhe e anuncia a task-alvo (LIGADO)
 flag_virar_worker.         // passo 3: explorador vira worker e busca/monta o bloco (LIGADO)
 flag_submeter.             // passo 3/4: worker submete a tarefa numa goal zone (LIGADO)
-// flag_multibloco.        // passo 5: tasks de 2 blocos (connect) - DESLIGADO (montagem ao vivo ainda nao fecha; ver D4). Descomente p/ retomar.
+// flag_multibloco.        // passo 5: tasks de 2 blocos (connect) - DESLIGADO (montagem ao vivo nao fecha: deriva e stuck resolvidos, mas a task expira antes da montagem; ver D4). Descomente p/ retomar.
 // flag_debug.             // diagnostico [DIAGW]/[DIAGE]/[DIAGM] (DESLIGADO; descomente p/ depurar)
 
 
