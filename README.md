@@ -159,45 +159,45 @@ O servidor MASSim e o time JaCaMo rodam em **dois processos** (mesma máquina ou
 
 ```mermaid
 graph TD
-  subgraph EST["Especificação Estrutural — grupo grupo_time (instância time_a)"]
+  subgraph EST["Structural Specification — group grupo_time (instance time_a)"]
     C["coordinator<br/>(1)"]
     E["explorer<br/>(1..50)"]
     W["worker<br/>(0..50)"]
     E -. "compatibility<br/>(adoptRole)" .-> W
   end
-  subgraph FUN["Especificação Funcional — esquema completar_tarefa"]
-    G(["meta: completar tarefa"])
-    MC["missão m_coordenar"]
-    ME["missão m_explorar"]
-    MW["missão m_construir"]
+  subgraph FUN["Functional Specification — scheme completar_tarefa"]
+    G(["goal: complete task"])
+    MC["mission m_coordenar"]
+    ME["mission m_explorar"]
+    MW["mission m_construir"]
     G --> MC
     G --> ME
     G --> MW
   end
-  C == "norma n_coord<br/>(obrigação)" ==> MC
-  E == "norma n_expl<br/>(obrigação)" ==> ME
-  W == "norma n_work<br/>(obrigação)" ==> MW
+  C == "norm n_coord<br/>(obligation)" ==> MC
+  E == "norm n_expl<br/>(obligation)" ==> ME
+  W == "norm n_work<br/>(obligation)" ==> MW
 ```
 
 **Arquitetura do SMA** — agentes Jason, ambiente CArtAgO (artefatos), organização MOISE+ e ponte para o servidor:
 
 ```mermaid
 graph LR
-  subgraph JACAMO["JaCaMo 1.3.0 (um processo)"]
-    subgraph AG["Agentes Jason (.asl) — camada BDI"]
+  subgraph JACAMO["JaCaMo 1.3.0 (single process)"]
+    subgraph AG["Jason agents (.asl) — BDI layer"]
       CO["coordenador1"]
       X1["explorador1"]
       X2["explorador2"]
     end
-    subgraph CART["CArtAgO — ambiente / artefatos"]
-      Q["QuadroEquipe<br/>(blackboard compartilhado)"]
+    subgraph CART["CArtAgO — environment / artifacts"]
+      Q["QuadroEquipe<br/>(shared blackboard)"]
       EAC["EISArtifact<br/>coordenador1"]
       EA1["EISArtifact<br/>explorador1"]
       EA2["EISArtifact<br/>explorador2"]
     end
     ORG["MOISE+<br/>OrgBoard time_a"]
   end
-  SRV[("Servidor MASSim 2022<br/>cenário Agents Assemble")]
+  SRV[("MASSim 2022 server<br/>Agents Assemble scenario")]
 
   CO --- EAC
   X1 --- EA1
@@ -205,7 +205,7 @@ graph LR
   CO -. "focus / obs.props" .-> Q
   X1 -. focus .-> Q
   X2 -. focus .-> Q
-  AG -. "missões/normas" .-> ORG
+  AG -. "missions/norms" .-> ORG
   EAC -- "EISMASSim TCP :12300" --> SRV
   EA1 -- "EISMASSim TCP" --> SRV
   EA2 -- "EISMASSim TCP" --> SRV
@@ -303,7 +303,7 @@ Placar do episódio: `adopt 2/2`, `request 2/2`, `attach 2/2`, `submit 1` (o seg
 
 | Item do enunciado | Onde está no projeto |
 |---|---|
-| **Item 1** — Introdução e objetivo | Time JaCaMo para o MAPC 2022 (*Agents Assemble II*). Objetivo: evoluir o esqueleto trivial (random walk + skip) para um time que **descobre recursos, coordena-se e completa tarefas**. Visão geral no topo deste README e em [CLAUDE.md](CLAUDE.md). **Hardware/software** em [§ Ambiente de execução](#ambiente-de-execução-hardware-e-software-item-1). |
+| **Item 1** — Introdução e objetivo | Time JaCaMo para o MAPC 2022 (*Agents Assemble II*). Objetivo: evoluir o esqueleto trivial (random walk + skip) para um time que **descobre recursos, coordena-se e completa tarefas**. Visão geral no topo deste README. **Hardware/software** em [§ Ambiente de execução](#ambiente-de-execução-hardware-e-software-item-1). |
 | **Item 2** — Análise e especificação do SMA | **Método de desenvolvimento** (empírico, dirigido a testes ao vivo) em [§ Método de desenvolvimento](#método-de-desenvolvimento-item-2). Organização em [src/org/org.xml](src/org/org.xml): 3 papéis sociais (`coordinator`/`explorer`/`worker`), esquema `completar_tarefa`, missões `m_coordenar`/`m_explorar`/`m_construir`, normas de obrigação. Especificação do **problema físico** (grid **toroidal**, percepção **relativa**, cadência por step) em **D1** e em [§ Como o servidor é configurado](#como-o-servidor-do-contest-massim-2022-é-configurado). |
 | **Item 3** — Arquitetura e design do SMA | **Diagramas** (modelo MOISE+ e arquitetura) em [§ Diagramas](#diagramas-organização-e-arquitetura-item-3). [mapc2022.jcm](mapc2022.jcm) (acoplamento agentes↔workspace↔organização), [src/env/mapc/QuadroEquipe.java](src/env/mapc/QuadroEquipe.java) (blackboard CArtAgO compartilhado) e [src/env/mapc/EISArtifact.java](src/env/mapc/EISArtifact.java) (ponte EISMASSim, uma `@OPERATION` por ação). Decisões de design registradas em **D1–D4**. |
 | **Item 4** — Linguagens e plataforma | **Jason** (agentes BDI), **CArtAgO** (ambiente/artefatos), **MOISE+** (organização), orquestrados por **JaCaMo 1.3.0**; ponte **EISMASSim** (TCP) ao servidor MASSim 2022. |
